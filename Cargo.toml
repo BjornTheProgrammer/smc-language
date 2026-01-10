@@ -1,0 +1,13 @@
+[package]
+name = "smc-assembler"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0"
+arbitrary-int = "2.0.0"
+clap = { version = "4.5.54", features = ["derive"] }
+thiserror = "2.0.17"
+
+tracing = "0.1"
+tracing-subscriber = { version = "0.3" }
