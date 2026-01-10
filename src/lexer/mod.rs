@@ -430,24 +430,71 @@ impl<'a> Lexer<'a> {
         self.skip_whitespace();
         let start = self.pos;
 
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() || c == b'.' || c == b'-' {
-                self.advance();
+        // Check for binary number prefix (0b)
+        let is_binary = if self.peek() == Some(b'0') {
+            let next_pos = self.pos + 1;
+            if next_pos < self.input.len() && self.input[next_pos] == b'b' {
+                self.advance(); // consume '0'
+                self.advance(); // consume 'b'
+                true
             } else {
-                break;
+                false
             }
-        }
+        } else {
+            false
+        };
 
-        let slice = std::str::from_utf8(&self.input[start..self.pos])
-            .unwrap()
-            .to_lowercase();
+        if is_binary {
+            // Read binary digits
+            while let Some(c) = self.peek() {
+                if c == b'0' || c == b'1' {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
 
-        match slice.parse::<N>() {
-            Ok(value) => Ok(value),
-            Err(_) => Err(LexerError::InvalidNumber(
-                Span::new(start, self.pos),
-                slice.to_string(),
-            )),
+            let slice = std::str::from_utf8(&self.input[(start + 2)..self.pos]).unwrap();
+
+            // Parse binary string to integer, then convert to target type
+            match i64::from_str_radix(slice, 2) {
+                Ok(value) => {
+                    // Convert to string and parse to target type
+                    let value_str = value.to_string();
+                    match value_str.parse::<N>() {
+                        Ok(v) => Ok(v),
+                        Err(_) => Err(LexerError::InvalidNumber(
+                            Span::new(start, self.pos),
+                            format!("0b{}", slice),
+                        )),
+                    }
+                }
+                Err(_) => Err(LexerError::InvalidNumber(
+                    Span::new(start, self.pos),
+                    format!("0b{}", slice),
+                )),
+            }
+        } else {
+            // Read decimal number (with optional negative sign)
+            while let Some(c) = self.peek() {
+                if c.is_ascii_digit() || c == b'.' || c == b'-' {
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            let slice = std::str::from_utf8(&self.input[start..self.pos])
+                .unwrap()
+                .to_lowercase();
+
+            match slice.parse::<N>() {
+                Ok(value) => Ok(value),
+                Err(_) => Err(LexerError::InvalidNumber(
+                    Span::new(start, self.pos),
+                    slice.to_string(),
+                )),
+            }
         }
     }
 
