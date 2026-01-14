@@ -99,6 +99,7 @@ impl Parser {
                 ..
             }) => Some(n),
             Ok(TokenSpan { token, span }) => {
+                self.recovery_mode = true;
                 errors.push(ParserError::ExpectedButReceived(
                     span,
                     "number".to_string(),
@@ -125,6 +126,7 @@ impl Parser {
                 ..
             }) => Some(cond),
             Ok(TokenSpan { token, span }) => {
+                self.recovery_mode = true;
                 errors.push(ParserError::ExpectedButReceived(
                     span,
                     "condition (eq, ne, ge, lt)".to_string(),
@@ -151,6 +153,7 @@ impl Parser {
                 ..
             }) => Some(id),
             Ok(TokenSpan { token, span }) => {
+                self.recovery_mode = true;
                 errors.push(ParserError::ExpectedButReceived(
                     span,
                     "identifier".to_string(),
@@ -181,6 +184,7 @@ impl Parser {
                 ..
             }) => Some(Address::Define(id)),
             Ok(TokenSpan { token, span }) => {
+                self.recovery_mode = true;
                 errors.push(ParserError::ExpectedButReceived(
                     span,
                     "address".to_string(),
@@ -207,6 +211,7 @@ impl Parser {
                 ..
             }) => Some(reg),
             Ok(TokenSpan { token, span }) => {
+                self.recovery_mode = true;
                 errors.push(ParserError::ExpectedButReceived(
                     span,
                     "register (r0-r15)".to_string(),
@@ -237,6 +242,7 @@ impl Parser {
                 ..
             }) => Some(Immediate::Define(id)),
             Ok(TokenSpan { token, span }) => {
+                self.recovery_mode = true;
                 errors.push(ParserError::ExpectedButReceived(
                     span,
                     "immediate (number or define)".to_string(),
