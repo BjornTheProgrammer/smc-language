@@ -135,7 +135,7 @@ pub fn compile<P: AsRef<Path>>(
         .map_err(|err| CompileError::WriteFileError(err))?;
     }
 
-    let parsed = Parser::new(tokens).parse();
+    let mut parsed = Parser::new(tokens).parse();
 
     if generate_debug_artifacts {
         fs::write(
@@ -170,6 +170,28 @@ pub fn compile<P: AsRef<Path>>(
                 .join("\n"),
         )
         .map_err(|err| CompileError::WriteFileError(err))?;
+    }
+
+    let ports = [
+        "pixel_x",
+        "pixel_y",
+        "draw_pixel",
+        "clear_pixel",
+        "load_pixel",
+        "buffer_screen",
+        "clear_screen_buffer",
+        "write_char",
+        "buffer_chars",
+        "clear_chars_buffer",
+        "show_number",
+        "clear_number",
+        "signed_mode",
+        "unsigned_mode",
+        "rng",
+        "controller_input",
+    ];
+    for (i, port) in ports.into_iter().enumerate() {
+        parsed.defines.insert(port.to_string(), (i + 240) as f32);
     }
 
     let assembler = Assembler::new(parsed);
