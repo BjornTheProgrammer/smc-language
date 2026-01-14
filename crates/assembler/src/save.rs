@@ -256,8 +256,11 @@ fn reset_registers(region: &mut Region, offset: [i32; 3]) {
 }
 
 pub fn make_schematic(data: &[u16]) -> Result<Schematic, CompileError> {
-    // Convert data to binary strings
-    let mut lines: Vec<String> = data.iter().map(|&word| format!("{:016b}", word)).collect();
+    let mut lines: Vec<String> = Vec::new();
+    for word in data {
+        let bytes = word.to_be_bytes();
+        lines.push(format!("{:08b}{:08b}", bytes[0], bytes[1]));
+    }
 
     // Pad to 1024 lines
     while lines.len() < 1024 {
