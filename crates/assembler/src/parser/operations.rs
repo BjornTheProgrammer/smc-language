@@ -1,9 +1,9 @@
-use crate::lexer::token::{Condition, Register};
+use crate::lexer::token::{Condition, Register, Span};
 use arbitrary_int::{u4, u10};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Immediate {
-    Value(u8),
+    Value(i8),
     Define(String),
 }
 
@@ -53,6 +53,6 @@ pub enum PseudoOperationWithArgs {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum OperationWithArgs {
-    Lowered(LoweredOperationWithArgs),
-    Pseudo(PseudoOperationWithArgs),
+    Lowered(LoweredOperationWithArgs, Span),
+    Pseudo(PseudoOperationWithArgs, Span),
 }

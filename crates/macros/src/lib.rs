@@ -95,7 +95,6 @@ fn needs_word_boundary_check(keyword: &str) -> bool {
 
 /// Generate a word boundary guard for a terminal match
 fn generate_terminal_with_boundary_check(
-    idx: usize,
     keyword_len: usize,
     expr: &Expr,
     keyword: &str,
@@ -130,7 +129,7 @@ fn generate_trie_match(
         if let Some(idx) = node.terminal {
             let expr = expressions[idx];
             let keyword_len = keywords[idx].len();
-            return generate_terminal_with_boundary_check(idx, keyword_len, expr, keywords[idx]);
+            return generate_terminal_with_boundary_check(keyword_len, expr, keywords[idx]);
         }
         return quote! { None };
     }
@@ -152,7 +151,6 @@ fn generate_trie_match(
                 let fallback_expr = expressions[idx];
                 let fallback_len = keywords[idx].len();
                 let fallback_with_check = generate_terminal_with_boundary_check(
-                    idx,
                     fallback_len,
                     fallback_expr,
                     keywords[idx],
@@ -184,7 +182,7 @@ fn generate_trie_match(
         let expr = expressions[idx];
         let keyword_len = keywords[idx].len();
         let terminal_with_check =
-            generate_terminal_with_boundary_check(idx, keyword_len, expr, keywords[idx]);
+            generate_terminal_with_boundary_check(keyword_len, expr, keywords[idx]);
         quote! { _ => #terminal_with_check }
     } else {
         quote! { _ => None }

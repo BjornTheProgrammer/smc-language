@@ -23,6 +23,7 @@ pub struct Parser {
     tokens: Vec<Result<TokenSpan, LexerError>>,
     recovery_mode: bool,
     pos: usize,
+    last_span: Span,
 }
 
 #[derive(Debug, Clone)]
@@ -66,6 +67,7 @@ impl Parser {
             tokens,
             recovery_mode: false,
             pos: 0,
+            last_span: Span::new(0, 0),
         }
     }
 
@@ -79,6 +81,14 @@ impl Parser {
     fn advance(&mut self) -> Result<TokenSpan, LexerError> {
         let token = self.peek(0);
         self.pos += 1;
+
+        match token {
+            Ok(TokenSpan { token: _, ref span }) => {
+                self.last_span = span.clone();
+            }
+            Err(_) => (),
+        }
+
         token
     }
 
@@ -221,7 +231,7 @@ impl Parser {
             Ok(TokenSpan {
                 token: Token::Number(n),
                 ..
-            }) => Some(Immediate::Value(n as u8)),
+            }) => Some(Immediate::Value(n as i8)),
             Ok(TokenSpan {
                 token: Token::Identifier(id),
                 ..
@@ -324,7 +334,7 @@ impl Parser {
                         Token::Keyword(Keyword::LoweredOperation(
                             op @ (LoweredOperation::Jmp | LoweredOperation::Cal),
                         )),
-                    span: _,
+                    span,
                 }) => {
                     let address = self.expect_address(0, &mut errors);
 
@@ -335,19 +345,23 @@ impl Parser {
 
                     let _ = self.advance();
 
+                    let span = Span::new(span.start(), self.last_span.end());
+
                     match op {
                         LoweredOperation::Jmp => operations.push(OperationWithArgs::Lowered(
                             LoweredOperationWithArgs::Jmp(address),
+                            span,
                         )),
                         LoweredOperation::Cal => operations.push(OperationWithArgs::Lowered(
                             LoweredOperationWithArgs::Cal(address),
+                            span,
                         )),
                         _ => unreachable!(),
                     }
                 }
                 Ok(TokenSpan {
                     token: Token::Keyword(Keyword::LoweredOperation(LoweredOperation::Brh)),
-                    span: _,
+                    span,
                 }) => {
                     let condition = self.expect_condition(0, &mut errors);
                     let address = self.expect_address(1, &mut errors);
@@ -360,9 +374,12 @@ impl Parser {
                     let _ = self.advance();
                     let _ = self.advance();
 
-                    operations.push(OperationWithArgs::Lowered(LoweredOperationWithArgs::Brh(
-                        condition, address,
-                    )));
+                    let span = Span::new(span.start(), self.last_span.end());
+
+                    operations.push(OperationWithArgs::Lowered(
+                        LoweredOperationWithArgs::Brh(condition, address),
+                        span,
+                    ));
                 }
                 Ok(TokenSpan {
                     token:
@@ -371,18 +388,22 @@ impl Parser {
                             | LoweredOperation::Hlt
                             | LoweredOperation::Ret),
                         )),
-                    span: _,
-                }) => {
-                    match op {
-                        LoweredOperation::Nop => operations
-                            .push(OperationWithArgs::Lowered(LoweredOperationWithArgs::Nop)),
-                        LoweredOperation::Hlt => operations
-                            .push(OperationWithArgs::Lowered(LoweredOperationWithArgs::Hlt)),
-                        LoweredOperation::Ret => operations
-                            .push(OperationWithArgs::Lowered(LoweredOperationWithArgs::Ret)),
-                        _ => unreachable!(),
-                    }
-                }
+                    span,
+                }) => match op {
+                    LoweredOperation::Nop => operations.push(OperationWithArgs::Lowered(
+                        LoweredOperationWithArgs::Nop,
+                        span,
+                    )),
+                    LoweredOperation::Hlt => operations.push(OperationWithArgs::Lowered(
+                        LoweredOperationWithArgs::Hlt,
+                        span,
+                    )),
+                    LoweredOperation::Ret => operations.push(OperationWithArgs::Lowered(
+                        LoweredOperationWithArgs::Ret,
+                        span,
+                    )),
+                    _ => unreachable!(),
+                },
                 Ok(TokenSpan {
                     token:
                         Token::Keyword(Keyword::LoweredOperation(
@@ -392,7 +413,7 @@ impl Parser {
                             | LoweredOperation::And
                             | LoweredOperation::Xor),
                         )),
-                    span: _,
+                    span,
                 }) => {
                     let r1 = self.expect_register(0, &mut errors);
                     let r2 = self.expect_register(1, &mut errors);
@@ -407,28 +428,35 @@ impl Parser {
                     let _ = self.advance();
                     let _ = self.advance();
 
+                    let span = Span::new(span.start(), self.last_span.end());
+
                     match op {
                         LoweredOperation::Add => operations.push(OperationWithArgs::Lowered(
                             LoweredOperationWithArgs::Add(r1, r2, r3),
+                            span,
                         )),
                         LoweredOperation::Sub => operations.push(OperationWithArgs::Lowered(
                             LoweredOperationWithArgs::Sub(r1, r2, r3),
+                            span,
                         )),
                         LoweredOperation::Nor => operations.push(OperationWithArgs::Lowered(
                             LoweredOperationWithArgs::Nor(r1, r2, r3),
+                            span,
                         )),
                         LoweredOperation::And => operations.push(OperationWithArgs::Lowered(
                             LoweredOperationWithArgs::And(r1, r2, r3),
+                            span,
                         )),
                         LoweredOperation::Xor => operations.push(OperationWithArgs::Lowered(
                             LoweredOperationWithArgs::Xor(r1, r2, r3),
+                            span,
                         )),
                         _ => unreachable!(),
                     }
                 }
                 Ok(TokenSpan {
                     token: Token::Keyword(Keyword::LoweredOperation(LoweredOperation::Rsh)),
-                    span: _,
+                    span,
                 }) => {
                     let r1 = self.expect_register(0, &mut errors);
                     let r2 = self.expect_register(1, &mut errors);
@@ -441,16 +469,19 @@ impl Parser {
                     let _ = self.advance();
                     let _ = self.advance();
 
-                    operations.push(OperationWithArgs::Lowered(LoweredOperationWithArgs::Rsh(
-                        r1, r2,
-                    )));
+                    let span = Span::new(span.start(), self.last_span.end());
+
+                    operations.push(OperationWithArgs::Lowered(
+                        LoweredOperationWithArgs::Rsh(r1, r2),
+                        span,
+                    ));
                 }
                 Ok(TokenSpan {
                     token:
                         Token::Keyword(Keyword::LoweredOperation(
                             op @ (LoweredOperation::Ldi | LoweredOperation::Adi),
                         )),
-                    span: _,
+                    span,
                 }) => {
                     let register = self.expect_register(0, &mut errors);
                     let immediate = self.expect_immediate(1, &mut errors);
@@ -463,15 +494,19 @@ impl Parser {
                     let _ = self.advance();
                     let _ = self.advance();
 
+                    let span = Span::new(span.start(), self.last_span.end());
+
                     match op {
                         LoweredOperation::Ldi => {
                             operations.push(OperationWithArgs::Lowered(
                                 LoweredOperationWithArgs::Ldi(register, immediate),
+                                span,
                             ));
                         }
                         LoweredOperation::Adi => {
                             operations.push(OperationWithArgs::Lowered(
                                 LoweredOperationWithArgs::Adi(register, immediate),
+                                span,
                             ));
                         }
                         _ => unreachable!(),
@@ -482,7 +517,7 @@ impl Parser {
                         Token::Keyword(Keyword::LoweredOperation(
                             op @ (LoweredOperation::Lod | LoweredOperation::Str),
                         )),
-                    span: _,
+                    span,
                 }) => {
                     let r1 = self.expect_register(0, &mut errors);
                     let r2 = self.expect_register(1, &mut errors);
@@ -500,15 +535,19 @@ impl Parser {
                         let _ = self.advance();
                     }
 
+                    let span = Span::new(span.start(), self.last_span.end());
+
                     match op {
                         LoweredOperation::Lod => {
                             operations.push(OperationWithArgs::Lowered(
                                 LoweredOperationWithArgs::Lod(r1, r2, offset),
+                                span,
                             ));
                         }
                         LoweredOperation::Str => {
                             operations.push(OperationWithArgs::Lowered(
                                 LoweredOperationWithArgs::Str(r1, r2, offset),
+                                span,
                             ));
                         }
                         _ => unreachable!(),
@@ -523,7 +562,7 @@ impl Parser {
                             | PseudoOperation::Not
                             | PseudoOperation::Neg),
                         )),
-                    span: _,
+                    span,
                 }) => {
                     let r1 = self.expect_register(0, &mut errors);
                     let r2 = self.expect_register(1, &mut errors);
@@ -536,21 +575,28 @@ impl Parser {
                     let _ = self.advance();
                     let _ = self.advance();
 
+                    let span = Span::new(span.start(), self.last_span.end());
+
                     match op {
                         PseudoOperation::Cmp => operations.push(OperationWithArgs::Pseudo(
                             PseudoOperationWithArgs::Cmp(r1, r2),
+                            span,
                         )),
                         PseudoOperation::Mov => operations.push(OperationWithArgs::Pseudo(
                             PseudoOperationWithArgs::Mov(r1, r2),
+                            span,
                         )),
                         PseudoOperation::Lsh => operations.push(OperationWithArgs::Pseudo(
                             PseudoOperationWithArgs::Lsh(r1, r2),
+                            span,
                         )),
                         PseudoOperation::Not => operations.push(OperationWithArgs::Pseudo(
                             PseudoOperationWithArgs::Not(r1, r2),
+                            span,
                         )),
                         PseudoOperation::Neg => operations.push(OperationWithArgs::Pseudo(
                             PseudoOperationWithArgs::Neg(r1, r2),
+                            span,
                         )),
                         _ => unreachable!(),
                     }
@@ -560,7 +606,7 @@ impl Parser {
                         Token::Keyword(Keyword::PseudoOperation(
                             op @ (PseudoOperation::Inc | PseudoOperation::Dec),
                         )),
-                    span: _,
+                    span,
                 }) => {
                     let register = self.expect_register(0, &mut errors);
 
@@ -571,12 +617,16 @@ impl Parser {
 
                     let _ = self.advance();
 
+                    let span = Span::new(span.start(), self.last_span.end());
+
                     match op {
                         PseudoOperation::Inc => operations.push(OperationWithArgs::Pseudo(
                             PseudoOperationWithArgs::Inc(register),
+                            span,
                         )),
                         PseudoOperation::Dec => operations.push(OperationWithArgs::Pseudo(
                             PseudoOperationWithArgs::Dec(register),
+                            span,
                         )),
                         _ => unreachable!(),
                     }
