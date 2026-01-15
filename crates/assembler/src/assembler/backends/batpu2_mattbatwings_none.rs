@@ -4,8 +4,11 @@ use crate::{
     assembler::{
         AssemblerError, backends::Backend, get_address_value, get_immediate_value, get_offset_value,
     },
-    lexer::token::{Condition, Span},
-    parser::{DefineMap, LabelMap, operations::OperationWithArgs},
+    lexer::token::{Condition, Register, Span},
+    parser::{
+        DefineMap, LabelMap,
+        operations::{Immediate, OperationWithArgs},
+    },
 };
 
 pub fn insert_before(
@@ -44,6 +47,19 @@ pub fn assemble_operation(
     span: Span,
 ) -> Result<u16, AssemblerError> {
     let backend = Backend::BatPU2;
+
+    // Instruction lowering
+    let operation = match operation {
+        OperationWithArgs::Cmp2(r1, r2) => OperationWithArgs::Sub3(r1, r2, Register::R0),
+        OperationWithArgs::Mov2(r1, r2) => OperationWithArgs::Add3(r1, Register::R0, r2),
+        OperationWithArgs::Lsh2(r1, r2) => OperationWithArgs::Add3(r1, r1, r2),
+        OperationWithArgs::Not2(r1, r2) => OperationWithArgs::Nor3(r1, Register::R0, r2),
+        OperationWithArgs::Neg2(r1, r2) => OperationWithArgs::Sub3(Register::R0, r1, r2),
+        OperationWithArgs::Inc1(r1) => OperationWithArgs::Adi2(r1, Immediate::Value(1)),
+        OperationWithArgs::Dec1(r1) => OperationWithArgs::Adi2(r1, Immediate::Value(-1)),
+        _ => operation,
+    };
+
     match operation {
         OperationWithArgs::Nop => Ok(0b0000 << 12),
         OperationWithArgs::Hlt => Ok(0b0001 << 12),

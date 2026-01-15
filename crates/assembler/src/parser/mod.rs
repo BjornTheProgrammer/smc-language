@@ -559,29 +559,17 @@ impl Parser {
 
                     let span = Span::new(span.start(), self.last_span.end());
 
-                    let r0 = Register(0);
-
                     match op {
-                        Operation::Cmp => operations.push(SpannedOperation::new(
-                            OperationWithArgs::Sub3(r1, r2, r0),
-                            span,
-                        )),
-                        Operation::Mov => operations.push(SpannedOperation::new(
-                            OperationWithArgs::Add3(r1, r0, r2),
-                            span,
-                        )),
-                        Operation::Lsh => operations.push(SpannedOperation::new(
-                            OperationWithArgs::Add3(r1, r1, r2),
-                            span,
-                        )),
-                        Operation::Not => operations.push(SpannedOperation::new(
-                            OperationWithArgs::Nor3(r1, r0, r2),
-                            span,
-                        )),
-                        Operation::Neg => operations.push(SpannedOperation::new(
-                            OperationWithArgs::Sub3(r0, r1, r2),
-                            span,
-                        )),
+                        Operation::Cmp => operations
+                            .push(SpannedOperation::new(OperationWithArgs::Cmp2(r1, r2), span)),
+                        Operation::Mov => operations
+                            .push(SpannedOperation::new(OperationWithArgs::Mov2(r1, r2), span)),
+                        Operation::Lsh => operations
+                            .push(SpannedOperation::new(OperationWithArgs::Lsh2(r1, r2), span)),
+                        Operation::Not => operations
+                            .push(SpannedOperation::new(OperationWithArgs::Not2(r1, r2), span)),
+                        Operation::Neg => operations
+                            .push(SpannedOperation::new(OperationWithArgs::Neg2(r1, r2), span)),
                         _ => unreachable!(),
                     }
                 }
@@ -603,11 +591,11 @@ impl Parser {
 
                     match op {
                         Operation::Inc => operations.push(SpannedOperation::new(
-                            OperationWithArgs::Adi2(register, Immediate::Value(1)),
+                            OperationWithArgs::Inc1(register),
                             span,
                         )),
                         Operation::Dec => operations.push(SpannedOperation::new(
-                            OperationWithArgs::Adi2(register, Immediate::Value(-1)),
+                            OperationWithArgs::Dec1(register),
                             span,
                         )),
                         _ => unreachable!(),

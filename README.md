@@ -7,7 +7,7 @@ An assembler that supports various MineCraft ISAs. Currently just an assembler, 
 Have cargo installed on your system first, you can install it from [here](https://rust-lang.org/tools/install/).
 
 ```bash
-cargo install --git https://github.com/BjornTheProgrammer/smc-language
+cargo install smc-assembler
 ```
 
 ## Why use this over [BatPU-2](https://github.com/mattbatwings/BatPU-2)

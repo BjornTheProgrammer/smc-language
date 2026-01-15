@@ -145,6 +145,10 @@ pub enum Keyword {
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub struct Register(pub u8);
 
+impl Register {
+    pub const R0: Register = Register(0);
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Keyword(Keyword),

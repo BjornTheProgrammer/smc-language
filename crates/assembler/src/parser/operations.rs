@@ -53,6 +53,10 @@ pub enum OperationWithArgs {
     Mst2(Register, Register),
     Pld2(Register, Register),
     Pst2(Register, Register),
+    Mov2(Register, Register),
+    Lsh2(Register, Register),
+    Not2(Register, Register),
+    Neg2(Register, Register),
 
     Rsh2(Register, Register),
     Rsh1(Register),
