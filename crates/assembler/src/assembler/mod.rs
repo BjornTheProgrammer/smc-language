@@ -69,34 +69,34 @@ impl Assembler {
         match operation {
             OperationWithArgs::Nop => Ok(0b0000 << 12),
             OperationWithArgs::Hlt => Ok(0b0001 << 12),
-            OperationWithArgs::Add(r1, r2, r3) => Ok(0b0010 << 12
+            OperationWithArgs::Add3(r1, r2, r3) => Ok(0b0010 << 12
                 | (((r1.value() & 0xF) as u16) << 8)
                 | (((r2.value() & 0xF) as u16) << 4)
                 | ((r3.value() & 0xF) as u16)),
-            OperationWithArgs::Sub(r1, r2, r3) => Ok(0b0011 << 12
+            OperationWithArgs::Sub3(r1, r2, r3) => Ok(0b0011 << 12
                 | (((r1.value() & 0xF) as u16) << 8)
                 | (((r2.value() & 0xF) as u16) << 4)
                 | ((r3.value() & 0xF) as u16)),
-            OperationWithArgs::Nor(r1, r2, r3) => Ok(0b0100 << 12
+            OperationWithArgs::Nor3(r1, r2, r3) => Ok(0b0100 << 12
                 | (((r1.value() & 0xF) as u16) << 8)
                 | (((r2.value() & 0xF) as u16) << 4)
                 | ((r3.value() & 0xF) as u16)),
-            OperationWithArgs::And(r1, r2, r3) => Ok(0b0101 << 12
+            OperationWithArgs::And3(r1, r2, r3) => Ok(0b0101 << 12
                 | (((r1.value() & 0xF) as u16) << 8)
                 | (((r2.value() & 0xF) as u16) << 4)
                 | ((r3.value() & 0xF) as u16)),
-            OperationWithArgs::Xor(r1, r2, r3) => Ok(0b0110 << 12
+            OperationWithArgs::Xor3(r1, r2, r3) => Ok(0b0110 << 12
                 | (((r1.value() & 0xF) as u16) << 8)
                 | (((r2.value() & 0xF) as u16) << 4)
                 | ((r3.value() & 0xF) as u16)),
-            OperationWithArgs::Rsh(r1, r2) => {
+            OperationWithArgs::Rsh2(r1, r2) => {
                 Ok(0b0111 << 12 | (((r1.value() & 0xF) as u16) << 8) | ((r2.value() & 0xF) as u16))
             }
-            OperationWithArgs::Ldi(r1, immediate) => Ok(0b1000 << 12
+            OperationWithArgs::Ldi2(r1, immediate) => Ok(0b1000 << 12
                 | (((r1.value() & 0xF) as u16) << 8)
                 | (get_immediate_value(span, &self.parser_results.defines, immediate)? as u8
                     as u16)),
-            OperationWithArgs::Adi(r1, immediate) => Ok(0b1001 << 12
+            OperationWithArgs::Adi2(r1, immediate) => Ok(0b1001 << 12
                 | (((r1.value() & 0xF) as u16) << 8)
                 | (get_immediate_value(span, &self.parser_results.defines, immediate)? as u8
                     as u16)),

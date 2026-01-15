@@ -1,0 +1,720 @@
+//TETRIS
+//Memory map: 240: score 
+//241 : Tetromino pixel 0 ... 244: Tetromino pixel 3
+//245 : Current tetromino rotation 0-3
+//246 : Current tetromino id 0-6
+//LR0 : RNG + multi-purpose
+//LR1 : Last keypress + multi-purpose
+//LR2 : Multi-purpose
+//LR3 : Address holder
+//RR0 : Recipient
+//RR0 ... RR2 : multi-purpose
+
+CLR R0
+LDI R1 245
+MST R1 R0 //Init rotation to 0
+CAL newTetromino
+
+mainloop:
+CAL erase
+CAL fall
+freshlySpawned: //Don't erase on creation
+CAL draw
+CAL wait
+JMP mainloop
+
+fall: //Check if can fall: if not, freeze and newTetromino
+JMP checkCollision //If zero: no collision
+notCollide:
+LDI R0 -16 //shift down
+CAL shift //can fall
+RET
+
+checkCollision: //First, check if hit floor
+LDI R3 241 //tetromino 0
+continueChecking:
+MLD R2 R3 //load the tetromino pixel
+ADI R2 -16 //lower it
+MLD R0 R2 //load whats in next spot in RAM
+CPI R0 240 //RAM init. to 240
+SKP 0
+JMP freeze
+ANI R2 240
+CPI R2 240 //If 0: hit floor
+SKP !0
+JMP freeze //freeze returns for checkCollision
+INC R3
+CPI R3 245
+SKP 0
+JMP continueChecking
+JMP notCollide //Did not collide
+
+freeze: //burns tetromino into board
+LDI R3 241 //tetromino 0
+LDI R1 -1 //Set pixel
+freezeLoop:
+MLD R2 R3
+MST R2 R1
+PST 0 R2
+INC R3
+CPI R3 245
+SKP 0
+JMP freezeLoop
+CAL testClear
+JMP newTetromino
+
+wait:
+BKR
+LDI R2 50
+BKL
+waitMore:
+CAL move
+BKR
+PLD R1 2 //Keypress
+CPI R1 32
+SKP !0
+JMP skipWait
+DEC R2
+BKL
+SKP 0
+JMP waitMore
+RET
+
+skipWait:
+CLR R1
+PST 2 R1
+BKL
+RET
+
+testClear:
+LDI R0 0 //Line
+LDI R1 0 //Byte in line
+continueLine:
+CPY R3 R0 //Copy of line
+ADD R3 R1 //Get absolute address
+MLD R2 R3 //Get what's there
+CPI R2 -1
+SKP 0
+JMP nextLine
+CPI R1 15 //If byte is 15th: clear!
+SKP !0
+JMP clearLine
+INC R1 //next byte
+JMP continueLine
+
+nextLine:
+ADI R0 16
+LDI R1 0
+CPI R0 240 //if 0: we have finished
+SKP 0
+JMP continueLine
+RET
+
+clearLine: //Assume R0 has line to clear
+PST 3 R2 //Increment score
+LDI R2 240 //"0" value
+LDI R1 0
+continueClearing:
+CPY R3 R1 //Copy of index
+ADD R3 R0 //Get absolute address
+MST R3 R2 //RAM[R3] = 240
+BKR
+LDI R0 240 //color white
+PST 0 R0
+BKL
+PST 0 R3 //clear
+INC R1
+CPI R1 16
+SKP 0
+JMP continueClearing
+BKR
+LDI R0 241 //color black
+PST 0 R0
+BKL
+CAL shiftRows
+ADI R0 -16 //account for shifting
+JMP nextLine
+
+shiftRows: //Assume R0 contains empty row ad.
+CPY R1 R0 //Get empty row into R1 (for modif.)
+shiftNextLine:
+ADI R1 16
+CPI R1 240
+SKP !0
+RET
+OR R1 R1 //consume
+CLR R2 //byte iterator
+shiftNextByte:
+CPY R3 R2 //copy
+ADD R3 R1 //Absolute address
+BKR
+LDI R2 240 //empty
+MLD R1 R3 //Get contents
+MST R3 R2 //delete old
+LDI R0 240
+PST 0 R0 //White
+PST 0 R3
+ADI R3 -16 //1 lower
+LDI R0 241
+PST 0 R0 //Black
+CPI R1 240 //Put R1 into flags
+SKP 0 //If nothing: skip drawing it
+PST 0 R3
+OR R3 R3 //consume
+MST R3 R1
+BKL
+INC R2 //Augment byte iterator
+CPI R2 16
+SKP 0
+JMP shiftNextByte
+JMP shiftNextLine
+
+testKeys: //assume R1 is keypress
+CPI R1 115
+SKP !0
+JMP rotateCounterclockwise
+CPI R1 119
+SKP !0
+JMP rotateClockwise
+CPI R1 100
+SKP !0
+JMP testMoveRight
+CPI R1 97
+SKP !0
+JMP testMoveLeft
+CPI R1 32 //space
+SKP !0
+CLR R1 //Avoid moving a lot for 1 press
+PST 2 R1
+RET
+
+rotationTests:
+LDI R0 0 //True
+LDI R3 242 //tetromino central
+MLD R2 R3 //Get position
+ANI R2 15 //lower 4 bits
+SKP !0
+LDI R0 -1 //Return value
+LDI R3 242 //tetromino central
+MLD R2 R3 //Get position
+ANI R2 15 //lower 4 bits
+CPI R2 15 //-1111, if 0: yes
+SKP !0
+LDI R0 -1 //Return value
+RET
+
+rotateCounterclockwise: //Test at the start
+CAL rotationTests
+OR R0 R0 //Put into flags
+SKP 0
+RET
+RET
+CAL erase
+LDI R3 242 //Tetromino 1 (rotate point)
+MLD R3 R3 //Get it in R3
+LDI R1 247 //Store it temporary here
+MST R1 R3 //Store
+LDI R3 245 //Current tetromino rotation
+MLD R1 R3
+DEC R1
+JMP rotate
+
+rotateClockwise: //Test at the start
+CAL rotationTests
+OR R0 R0 //Put into flags
+SKP 0
+RET
+RET
+CAL erase
+LDI R3 242 //Tetromino 1 (rotate point)
+MLD R3 R3 //Get it in R3
+LDI R1 247 //Store it temporary here
+MST R1 R3 //Store
+LDI R3 245 //Current tetromino rotation
+MLD R1 R3
+INC R1
+rotate:
+MST R3 R1 //Change (rotate counter/clockwise)
+LDI R3 246
+MLD R0 R3 //Get the ID
+CAL drawTetromino //Get appropriate pixels
+LDI R3 247
+MLD R3 R3 //Rotate point
+CPY R1 R3 //Copy for Ys
+DEC R3 //Adjust X position
+ANI R3 15 //Keep X's
+ANI R1 240 //Keep Y's
+LDI R0 240
+SUB R0 R1
+INV R0
+ADI R0 48 //negative
+ANI R0 240 //Keep Y's again
+OR R3 R0 //Composite offset in R0
+ADD R2 R3 //Add offset
+MLD R1 R2
+CPI R1 240
+SKP 0
+RET
+RET
+BKR
+ADD R0 R3
+ADD R1 R3
+ADD R2 R3 //Add all offsets, now test shifting into pieces
+MLD R3 R0
+CPI R3 240
+SKP 0
+RET
+RET
+MLD R3 R1
+CPI R3 240
+SKP 0
+RET
+RET
+MLD R3 R2
+CPI R3 240 //This code can be factorized
+SKP 0
+RET
+RET
+BKL
+LDI R1 241 //Tetromino pixels, use R1 because of dependencies
+MST R1 R2
+CPY R3 R1 //Copy so don't destroy return value
+BKR
+INC R3
+MST R3 R0
+INC R3
+MST R3 R1
+INC R3
+MST R3 R2
+BKL //All burned into RAM
+JMP legalMove
+
+drawTetromino: //Assume R0 is tetromino ID //Puts vigin in regs
+LDI R3 245
+MLD R1 R3 //Get rotation
+ANI R1 3 //Only keep lower 2
+CPI R0 1
+SKP !0
+JMP initI
+CPI R0 2
+SKP !0
+JMP initJ
+CPI R0 3
+SKP !0
+JMP initL
+CPI R0 4
+SKP !0
+JMP initO
+CPI R0 5
+SKP !0
+JMP initS
+CPI R0 6
+SKP !0
+JMP initT
+JMP initZ
+
+testMoveLeft:
+LDI R3 241 //tetromino 0
+MLD R2 R3 //Get position
+ANI R2 15 //lower 4 bits
+SKP !0
+RET //Return if lower 4 are 0000
+OR R3 R3 //consume
+continueTestLeft:
+MLD R2 R3 //Checking for other tile collision
+DEC R2 //Tile to the left
+MLD R2 R2 //Get that tile' pos
+CPI R2 240 //Test if 240. Screen init. 240
+SKP 0
+RET
+OR R3 R3 //consume
+INC R3
+CPI R3 245
+SKP !0
+JMP legalMove
+JMP continueTestLeft
+
+testMoveRight:
+LDI R3 244 //tetromino 3
+MLD R2 R3 //Get pos
+ANI R2 15 //lower 4
+CPI R2 15 //-1111, if 0: yes
+SKP !0
+RET //Return if lower are 1111
+OR R3 R3 //consume
+continueTestRight:
+MLD R2 R3 //Checking for other tile collision
+INC R2 //Tile to the right
+MLD R2 R2 //Get that tile' pos
+CPI R2 240 //Test if 240. Screen init. 240
+SKP 0
+RET
+OR R3 R3 //consume
+DEC R3
+CPI R3 240
+SKP !0
+JMP legalMove
+JMP continueTestRight
+
+move: //Test if keys are legal
+PLD R1 2 //keypress
+JMP testKeys
+legalMove:
+CAL erase
+CPI R1 97 //A
+SKP !0
+LDI R0 -1
+CPI R1 100 //D
+SKP !0
+LDI R0 1
+CPI R1 241 //241 is number left by rotateClockwise
+SKP 0
+CAL shift
+OR R1 R1 //consume
+CLR R1 //Avoid moving a lot for 1 press
+PST 2 R1
+CAL draw
+RET
+
+shift:
+LDI R1 4
+LDI R3 241
+continueShift:
+MLD R2 R3
+ADD R2 R0 //Use R0: trust caller set to 1, -1 or -16
+MST R3 R2
+INC R3
+DEC R1
+SKP 0
+JMP continueShift
+RET
+
+erase:
+LDI R2 240 //Color white
+PST 0 R2 //Set
+CAL draw
+LDI R2 241 //Color black
+PST 0 R2 //Set
+RET
+
+draw:
+LDI R3 241 //Tetromino 0
+MLD R2 R3 //Get address to R2
+PST 0 R2 //Draw first pixel
+INC R3 //Tetromino 1
+MLD R2 R3
+PST 0 R2
+INC R3 //Tetromino 2
+MLD R2 R3
+PST 0 R2
+INC R3 //Tetromino 3
+MLD R2 R3
+PST 0 R2
+RET
+
+newTetromino:
+BKL
+PLD R0 1 //RNG 0-255
+ANI R0 7 //Keep lower 3 bits
+LDI R3 246 //Tetromino ID
+MST R3 R0 //Store ID
+CAL drawTetromino //Returns stuff in R0..R2
+LDI R3 241 //Tetromino 0 //LOAD INTO RAM
+ADI R2 6 //SHIFT
+MST R3 R2 //RAM[R3] = R2
+INC R3 //Tetromino 1
+BKR
+ADI R0 6 //SHIFT
+MST R3 R0
+INC R3 //Tetromino 2
+ADI R1 6 //SHIFT
+MST R3 R1
+INC R3 //Tetromino 3
+ADI R2 6 //SHIFT
+MST R3 R2
+BKL
+RET
+
+//For inits: rotation in 245, ID in 246, assume rotation in R1
+
+initI: //id: 1
+CPI R1 1
+SKP !0
+JMP IPiece1
+CPI R1 2
+SKP !0
+JMP IPiece0
+CPI R1 3
+SKP !0
+JMP IPiece1
+JMP IPiece0
+
+initJ:
+CPI R1 1
+SKP !0
+JMP JPiece1
+CPI R1 2
+SKP !0
+JMP JPiece2
+CPI R1 3
+SKP !0
+JMP JPiece3
+JMP JPiece0
+
+initL:
+CPI R1 1
+SKP !0
+JMP LPiece1
+CPI R1 2
+SKP !0
+JMP LPiece2
+CPI R1 3
+SKP !0
+JMP LPiece3
+JMP LPiece0
+
+initO:
+JMP OPiece0
+
+initS:
+CPI R1 1
+SKP !0
+JMP SPiece1
+CPI R1 2
+SKP !0
+JMP SPiece2
+CPI R1 3
+SKP !0
+JMP SPiece3
+JMP SPiece0
+
+initT:
+CPI R1 1
+SKP !0
+JMP TPiece1
+CPI R1 2
+SKP !0
+JMP TPiece2
+CPI R1 3
+SKP !0
+JMP TPiece3
+JMP TPiece0
+
+initZ:
+CPI R1 1
+SKP !0
+JMP ZPiece1
+CPI R1 2
+SKP !0
+JMP ZPiece2
+CPI R1 3
+SKP !0
+JMP ZPiece3
+JMP ZPiece0
+
+IPiece0: //R0 contains rotating point
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 210
+LDI R2 211
+BKL 
+RET
+
+IPiece1:
+LDI R2 225  
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 177
+BKL
+RET
+
+JPiece0:
+LDI R2 224
+BKR
+LDI R0 209
+LDI R1 208
+LDI R2 210
+BKL
+RET
+
+JPiece1:
+LDI R2 225
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 226
+BKL
+RET
+
+JPiece2:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 210
+LDI R2 194
+BKL
+RET
+
+JPiece3:
+LDI R2 192
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 225
+BKL
+RET
+
+LPiece0:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 210
+LDI R2 226
+BKL
+RET
+
+LPiece1:
+LDI R2 225
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 194
+BKL
+RET
+
+LPiece2:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 192
+LDI R2 210
+BKL
+RET
+
+LPiece3:
+LDI R2 224
+BKR
+LDI R0 209
+LDI R1 225
+LDI R2 193
+BKL
+RET
+
+OPiece0:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 192
+LDI R2 193
+BKL
+RET
+
+SPiece0:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 225
+LDI R2 226
+BKL
+RET
+
+SPiece1:
+LDI R2 225      
+BKR
+LDI R0 209
+LDI R1 210
+LDI R2 194
+BKL
+RET
+
+SPiece2:
+LDI R2 192
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 210
+BKL
+RET
+
+SPiece3:
+LDI R2 224
+BKR
+LDI R0 209
+LDI R1 208
+LDI R2 193
+BKL
+RET
+
+TPiece0:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 225
+LDI R2 210
+BKL
+RET
+
+TPiece1:
+LDI R2 225
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 210
+BKL
+RET
+
+TPiece2:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 210
+BKL
+RET
+
+TPiece3:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 225
+LDI R2 193
+BKL
+RET
+
+ZPiece0:
+LDI R2 224
+BKR
+LDI R0 209
+LDI R1 225
+LDI R2 210
+BKL
+RET
+
+ZPiece1:
+LDI R2 193
+BKR
+LDI R0 209
+LDI R1 210
+LDI R2 226
+BKL
+RET
+
+ZPiece2:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 193
+LDI R2 194
+BKL
+RET
+
+ZPiece3:
+LDI R2 208
+BKR
+LDI R0 209
+LDI R1 192
+LDI R2 225
+BKL
+RET

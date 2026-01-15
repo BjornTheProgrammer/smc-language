@@ -24,31 +24,65 @@ pub enum Offset {
 }
 
 #[derive(Debug, PartialEq, Clone)]
+pub enum SkipFlag {
+    Never,
+    IfZero,
+    IfNotZero,
+    IfNegative,
+    IfNotNegative,
+    Always,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum OperationWithArgs {
+    Add3(Register, Register, Register),
+    Add2(Register, Register),
+
+    Sub3(Register, Register, Register),
+    Sub2(Register, Register),
+
+    Nor3(Register, Register, Register),
+
+    And3(Register, Register, Register),
+    And2(Register, Register),
+
+    Xor3(Register, Register, Register),
+    Xor2(Register, Register),
+
+    Or2(Register, Register),
+    Cmp2(Register, Register),
+    Cpy2(Register, Register),
+    Adc2(Register, Register),
+    Mld2(Register, Register),
+    Mst2(Register, Register),
+    Pld2(Register, Register),
+    Pst2(Register, Register),
+
+    Rsh2(Register, Register),
+    Rsh1(Register),
+
+    Inv1(Register),
+    Inc1(Register),
+    Dec1(Register),
+
+    Ldi2(Register, Immediate),
+    Adi2(Register, Immediate),
+    Cpi2(Register, Immediate),
+    Ani2(Register, Immediate),
+
+    Jmp(Address),
+    Cal(Address),
+
     Nop,
     Hlt,
-    Add(Register, Register, Register),
-    Sub(Register, Register, Register),
-    Nor(Register, Register, Register),
-    And(Register, Register, Register),
-    Xor(Register, Register, Register),
-    Rsh(Register, Register),
-    Ldi(Register, Immediate),
-    Adi(Register, Immediate),
-    Jmp(Address),
-    Brh(Condition, Address),
-    Cal(Address),
+    Bkl,
+    Bkr,
     Ret,
+    Skp(SkipFlag),
+
+    Brh(Condition, Address),
     Lod(Register, Register, Option<Offset>),
     Str(Register, Register, Option<Offset>),
-
-    Cmp(Register, Register), // CMP A B -> SUB A B r0
-    Mov(Register, Register), // MOV A C -> ADD A r0 C
-    Lsh(Register, Register), // LSH A C -> ADD A A C
-    Inc(Register),           // INC A -> ADI A 1
-    Dec(Register),           // DEC A -> ADI A -1
-    Not(Register, Register), // NOT A C -> NOR A r0 C
-    Neg(Register, Register), // NEG A C -> SUB r0 A C
 }
 
 #[derive(Debug, PartialEq, Clone)]
