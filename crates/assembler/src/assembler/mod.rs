@@ -2,7 +2,7 @@ use thiserror::Error;
 
 use crate::{
     assembler::backends::Backend,
-    lexer::token::Span,
+    lexer::token::{Condition, Span},
     parser::{
         DefineMap, LabelMap, ParserError, ParserResult,
         operations::{Address, Immediate, Offset, OperationWithArgs, SpannedOperation},
@@ -38,6 +38,9 @@ pub enum AssemblerError {
 
     #[error("AssemblerError: Offset out of range {1}")]
     OffsetOutOfRange(Span, i128),
+
+    #[error("AssemblerError: Invalid Condition for target {1:?}")]
+    InvalidCondition(Span, Condition),
 }
 
 impl Assembler {

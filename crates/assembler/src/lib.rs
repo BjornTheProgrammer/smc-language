@@ -71,11 +71,13 @@ pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
                         ParserError::DuplicateLabel(span, _) => span,
                         ParserError::ExpectedButReceived(span, _, _) => span,
                         ParserError::UnexpectedEof(span) => span,
+                        ParserError::InvalidSkip(span, _) => span,
                     },
                     AssemblerError::UnsupportedOperation(span, _) => span,
                     AssemblerError::InvalidRegister(span, _) => span,
                     AssemblerError::AddressOutOfRange(span, _) => span,
                     AssemblerError::OffsetOutOfRange(span, _) => span,
+                    AssemblerError::InvalidCondition(span, _) => span,
                 };
 
                 eprintln!("{}", span.format_error(&input, &source, &err.to_string()));

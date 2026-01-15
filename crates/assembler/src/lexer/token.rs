@@ -106,6 +106,10 @@ pub enum Condition {
     NotEqual,
     GreaterEqual,
     Less,
+    Not,
+    NotZero,
+    Negative,
+    NotNegative,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -133,6 +137,19 @@ pub enum Operation {
     Dec,
     Not,
     Neg,
+    Or,
+    Cpy,
+    Adc,
+    Mld,
+    Mst,
+    Pld,
+    Pst,
+    Inv,
+    Cpi,
+    Ani,
+    Bkl,
+    Bkr,
+    Skp,
 }
 
 #[derive(Debug, PartialEq, Clone)]

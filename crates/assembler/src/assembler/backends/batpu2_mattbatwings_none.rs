@@ -101,6 +101,7 @@ pub fn assemble_operation(
                 Condition::NotEqual => 0b01,
                 Condition::GreaterEqual => 0b10,
                 Condition::Less => 0b11,
+                _ => return Err(AssemblerError::InvalidCondition(span, condition)),
             };
 
             Ok(0b1011 << 12

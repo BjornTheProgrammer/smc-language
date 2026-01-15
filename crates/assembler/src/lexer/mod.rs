@@ -128,7 +128,6 @@ impl<'a> Lexer<'a> {
             "Ret" => Keyword::Operation(Operation::Ret),
             "Lod" => Keyword::Operation(Operation::Lod),
             "Str" => Keyword::Operation(Operation::Str),
-
             "Cmp" => Keyword::Operation(Operation::Cmp),
             "Mov" => Keyword::Operation(Operation::Mov),
             "Lsh" => Keyword::Operation(Operation::Lsh),
@@ -136,6 +135,19 @@ impl<'a> Lexer<'a> {
             "Dec" => Keyword::Operation(Operation::Dec),
             "Not" => Keyword::Operation(Operation::Not),
             "Neg" => Keyword::Operation(Operation::Neg),
+            "Or" => Keyword::Operation(Operation::Or),
+            "Cpy" => Keyword::Operation(Operation::Cpy),
+            "Adc" => Keyword::Operation(Operation::Adc),
+            "Mld" => Keyword::Operation(Operation::Mld),
+            "Mst" => Keyword::Operation(Operation::Mst),
+            "Pld" => Keyword::Operation(Operation::Pld),
+            "Pst" => Keyword::Operation(Operation::Pst),
+            "Inv" => Keyword::Operation(Operation::Inv),
+            "Cpi" => Keyword::Operation(Operation::Cpi),
+            "Ani" => Keyword::Operation(Operation::Ani),
+            "Bkl" => Keyword::Operation(Operation::Bkl),
+            "Bkr" => Keyword::Operation(Operation::Bkr),
+            "Skp" => Keyword::Operation(Operation::Skp),
 
             "eq" => Keyword::Condition(Condition::Equal),
             "ne" => Keyword::Condition(Condition::NotEqual),
@@ -146,6 +158,10 @@ impl<'a> Lexer<'a> {
             "!=" => Keyword::Condition(Condition::NotEqual),
             ">=" => Keyword::Condition(Condition::GreaterEqual),
             "<" => Keyword::Condition(Condition::Less),
+
+            "!" => Keyword::Condition(Condition::Not),
+            "!0" => Keyword::Condition(Condition::NotZero),
+            "!-" => Keyword::Condition(Condition::NotNegative),
 
             "z" => Keyword::Condition(Condition::Equal),
             "nz" => Keyword::Condition(Condition::NotEqual),
@@ -194,7 +210,19 @@ impl<'a> Lexer<'a> {
                     Token::Label(self.read_identifier()),
                     Span::new(start, self.pos),
                 ),
-                Some(b'0'..=b'9') | Some(b'-') => {
+                Some(b'-') => {
+                    if self.skip_whitespace() {
+                        TokenSpan::new(
+                            Token::Keyword(Keyword::Condition(Condition::Not)),
+                            Span::new(start, start),
+                        )
+                    } else {
+                        self.pos -= 1;
+                        let value: f64 = self.read_number()?;
+                        TokenSpan::new(Token::Number(value), Span::new(start, self.pos))
+                    }
+                }
+                Some(b'0'..=b'9') => {
                     self.pos -= 1;
                     let value: f64 = self.read_number()?;
                     TokenSpan::new(Token::Number(value), Span::new(start, self.pos))

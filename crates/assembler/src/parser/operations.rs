@@ -78,6 +78,7 @@ pub enum OperationWithArgs {
     Bkl,
     Bkr,
     Ret,
+
     Skp(SkipFlag),
 
     Brh(Condition, Address),
