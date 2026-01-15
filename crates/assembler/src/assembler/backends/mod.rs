@@ -1,13 +1,51 @@
-use arbitrary_int::{u2, u4};
 use clap::{ValueEnum, builder::PossibleValue};
 use strum::VariantArray;
 use strum_macros::VariantArray;
-use thiserror::Error;
+
+use crate::{
+    assembler::AssemblerError,
+    lexer::token::{Register, Span},
+    parser::{DefineMap, LabelMap, operations::OperationWithArgs},
+};
+
+pub mod batpu2_mattbatwings_none;
+pub mod tau_analyzers_none;
 
 #[derive(Debug, Clone, PartialEq, VariantArray)]
 pub enum Backend {
     BatPU2,
     TauAnalyzersNone,
+}
+
+impl Backend {
+    pub fn insert_before(
+        &self,
+        defines: &mut DefineMap,
+        labels: &mut LabelMap,
+    ) -> Result<(), AssemblerError> {
+        match self {
+            Backend::BatPU2 => batpu2_mattbatwings_none::insert_before(defines, labels),
+            Backend::TauAnalyzersNone => Ok(()),
+        }
+    }
+
+    pub fn assemble_operation(
+        &self,
+        defines: &DefineMap,
+        labels: &LabelMap,
+        op: OperationWithArgs,
+        span: Span,
+    ) -> Result<u16, AssemblerError> {
+        match self {
+            Backend::BatPU2 => {
+                batpu2_mattbatwings_none::assemble_operation(defines, labels, op, span)
+            }
+            Backend::TauAnalyzersNone => {
+                Ok(0)
+                // tau_analyzers_none::assemble_operation(defines, labels, op, span)
+            }
+        }
+    }
 }
 
 impl ValueEnum for Backend {
@@ -29,46 +67,17 @@ impl Backend {
     }
 }
 
-#[derive(Error, Debug, Clone)]
-pub enum RegisterError {
-    #[error("Invalid BatPU2 register: r{0} (valid: r0-r15)")]
-    InvalidBatPU2(u8),
-    #[error("Invalid TauAnalyzers register: r{0} (valid: r0-r3)")]
-    InvalidTauAnalyzers(u8),
-}
-
-/// Backend-specific register types
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Register {
-    /// BatPU2: 16 registers (r0-r15), 4-bit encoding
-    BatPU2(u4),
-    /// TauAnalyzers: 4 banked registers (r0-r3), 2-bit encoding
-    /// (7 total via banking, but instruction only encodes 2 bits)
-    TauAnalyzers(u2),
-}
-
 impl Register {
-    pub fn batpu2(val: u8) -> Result<Self, RegisterError> {
-        if val > 15 {
-            Err(RegisterError::InvalidBatPU2(val))
-        } else {
-            Ok(Register::BatPU2(u4::new(val)))
-        }
-    }
-
-    pub fn tau(val: u8) -> Result<Self, RegisterError> {
-        if val > 3 {
-            Err(RegisterError::InvalidTauAnalyzers(val))
-        } else {
-            Ok(Register::TauAnalyzers(u2::new(val)))
-        }
-    }
-
-    /// Get raw value for encoding
-    pub fn value(&self) -> u8 {
-        match self {
-            Register::BatPU2(r) => r.value(),
-            Register::TauAnalyzers(r) => r.value(),
+    fn check(&self, backend: &Backend, span: &Span) -> Result<u8, AssemblerError> {
+        match backend {
+            Backend::BatPU2 => match self {
+                Register(0..=15) => Ok(self.0),
+                Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
+            },
+            Backend::TauAnalyzersNone => match self {
+                Register(0..=3) => Ok(self.0),
+                Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
+            },
         }
     }
 }

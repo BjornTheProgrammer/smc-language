@@ -65,6 +65,7 @@ pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
                             LexerError::UnknownCondition(span, _) => span,
                             LexerError::InvalidOffset(span, _) => span,
                             LexerError::InvalidIsaCode(span, _) => span,
+                            LexerError::InvalidRegisterNumber(span, _) => span,
                         },
                         ParserError::DuplicateDefine(span, _) => span,
                         ParserError::DuplicateLabel(span, _) => span,
@@ -72,6 +73,9 @@ pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
                         ParserError::UnexpectedEof(span) => span,
                     },
                     AssemblerError::UnsupportedOperation(span, _) => span,
+                    AssemblerError::InvalidRegister(span, _) => span,
+                    AssemblerError::AddressOutOfRange(span, _) => span,
+                    AssemblerError::OffsetOutOfRange(span, _) => span,
                 };
 
                 eprintln!("{}", span.format_error(&input, &source, &err.to_string()));
@@ -108,7 +112,7 @@ pub fn compile<P: AsRef<Path>>(
 
     let source = fs::read_to_string(&input).map_err(|err| CompileError::ReadFileError(err))?;
 
-    let tokens: Vec<_> = Lexer::new(&source, &target).into_iter().collect();
+    let tokens: Vec<_> = Lexer::new(&source).into_iter().collect();
 
     if generate_debug_artifacts {
         fs::write(
@@ -122,7 +126,7 @@ pub fn compile<P: AsRef<Path>>(
         .map_err(|err| CompileError::WriteFileError(err))?;
     }
 
-    let mut parsed = Parser::new(target.clone(), tokens).parse();
+    let parsed = Parser::new(tokens).parse();
 
     if generate_debug_artifacts {
         fs::write(
@@ -157,28 +161,6 @@ pub fn compile<P: AsRef<Path>>(
                 .join("\n"),
         )
         .map_err(|err| CompileError::WriteFileError(err))?;
-    }
-
-    let ports = [
-        "pixel_x",
-        "pixel_y",
-        "draw_pixel",
-        "clear_pixel",
-        "load_pixel",
-        "buffer_screen",
-        "clear_screen_buffer",
-        "write_char",
-        "buffer_chars",
-        "clear_chars_buffer",
-        "show_number",
-        "clear_number",
-        "signed_mode",
-        "unsigned_mode",
-        "rng",
-        "controller_input",
-    ];
-    for (i, port) in ports.into_iter().enumerate() {
-        parsed.defines.insert(port.to_string(), (i + 240) as f32);
     }
 
     let assembler = Assembler::new(target, parsed);

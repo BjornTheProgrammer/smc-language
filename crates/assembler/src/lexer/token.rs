@@ -1,7 +1,5 @@
 use std::path::Path;
 
-use crate::assembler::backends::Register;
-
 #[derive(Debug, PartialEq, Clone)]
 pub struct TokenSpan {
     pub token: Token,
@@ -140,17 +138,20 @@ pub enum Operation {
 #[derive(Debug, PartialEq, Clone)]
 pub enum Keyword {
     Operation(Operation),
-    Register(Register),
     Condition(Condition),
     Define,
 }
+
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct Register(pub u8);
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
     Keyword(Keyword),
     Label(String),
     Identifier(String),
-    Number(f32),
+    Number(f64),
     Comma,
     Eof,
+    Register(Register),
 }

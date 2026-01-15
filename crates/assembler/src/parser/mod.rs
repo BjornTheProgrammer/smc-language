@@ -1,13 +1,11 @@
 use std::collections::HashMap;
 
-use arbitrary_int::{u4, u10};
 use thiserror::Error;
 
 use crate::{
-    assembler::backends::{Backend, Register},
     lexer::{
         LexerError,
-        token::{Condition, Keyword, Operation, Span, Token, TokenSpan},
+        token::{Condition, Keyword, Operation, Register, Span, Token, TokenSpan},
     },
     parser::operations::{Address, Immediate, Offset, OperationWithArgs, SpannedOperation},
 };
@@ -18,7 +16,6 @@ pub mod operations;
 pub struct Parser {
     tokens: Vec<Result<TokenSpan, LexerError>>,
     recovery_mode: bool,
-    target: Backend,
     pos: usize,
     last_span: Span,
 }
@@ -30,7 +27,7 @@ pub enum ParsedItem {
     Define(String, f32),
 }
 
-pub type DefineMap = HashMap<String, f32>;
+pub type DefineMap = HashMap<String, f64>;
 pub type LabelMap = HashMap<String, usize>;
 
 #[derive(Error, Debug, Clone)]
@@ -59,10 +56,9 @@ pub struct ParserResult {
 }
 
 impl Parser {
-    pub fn new(target: Backend, tokens: Vec<Result<TokenSpan, LexerError>>) -> Self {
+    pub fn new(tokens: Vec<Result<TokenSpan, LexerError>>) -> Self {
         Parser {
             tokens,
-            target,
             recovery_mode: false,
             pos: 0,
             last_span: Span::new(0, 0),
@@ -90,7 +86,7 @@ impl Parser {
         token
     }
 
-    fn expect_number(&mut self, offset: usize, errors: &mut Vec<ParserError>) -> Option<f32> {
+    fn expect_number(&mut self, offset: usize, errors: &mut Vec<ParserError>) -> Option<f64> {
         match self.peek(offset) {
             Ok(TokenSpan {
                 token: Token::Number(n),
@@ -172,7 +168,7 @@ impl Parser {
             Ok(TokenSpan {
                 token: Token::Number(n),
                 ..
-            }) => Some(Address::Value(u10::new(n as u16))),
+            }) => Some(Address::Value(n as i128)),
             Ok(TokenSpan {
                 token: Token::Label(l),
                 ..
@@ -205,7 +201,7 @@ impl Parser {
     ) -> Option<Register> {
         match self.peek(offset) {
             Ok(TokenSpan {
-                token: Token::Keyword(Keyword::Register(reg)),
+                token: Token::Register(reg),
                 ..
             }) => Some(reg),
             Ok(TokenSpan { token, span }) => {
@@ -234,7 +230,7 @@ impl Parser {
             Ok(TokenSpan {
                 token: Token::Number(n),
                 ..
-            }) => Some(Immediate::Value(n as i32 as i8)),
+            }) => Some(Immediate::Value(n as i128)),
             Ok(TokenSpan {
                 token: Token::Identifier(id),
                 ..
@@ -261,7 +257,7 @@ impl Parser {
             Ok(TokenSpan {
                 token: Token::Number(n),
                 ..
-            }) => Some(Offset::Value(u4::new(n as i32 as u8 & 0x0F))),
+            }) => Some(Offset::Value(n as i128)),
             Ok(TokenSpan {
                 token: Token::Identifier(id),
                 ..
@@ -563,7 +559,7 @@ impl Parser {
 
                     let span = Span::new(span.start(), self.last_span.end());
 
-                    let r0 = Register::BatPU2(u4::from_u8(0));
+                    let r0 = Register(0);
 
                     match op {
                         Operation::Cmp => operations.push(SpannedOperation::new(

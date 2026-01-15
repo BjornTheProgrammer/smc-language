@@ -10,9 +10,9 @@ repository.workspace = true
 smc-macros = { version = "0.1.0", path = "../macros" }
 
 anyhow = { workspace = true }
-arbitrary-int = { workspace = true }
 clap = { workspace = true }
 thiserror = { workspace = true }
+arbitrary-int = { workspace = true }
 
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

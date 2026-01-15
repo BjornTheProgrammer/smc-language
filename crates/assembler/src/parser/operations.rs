@@ -1,25 +1,21 @@
-use crate::{
-    assembler::backends::Register,
-    lexer::token::{Condition, Span},
-};
-use arbitrary_int::{u4, u10};
+use crate::lexer::token::{Condition, Register, Span};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Immediate {
-    Value(i8),
+    Value(i128),
     Define(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Address {
-    Value(u10),
+    Value(i128),
     Define(String),
     Label(String),
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Offset {
-    Value(u4),
+    Value(i128),
     Define(String),
 }
 

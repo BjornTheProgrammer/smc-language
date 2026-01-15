@@ -1,9 +1,6 @@
 use std::str::FromStr;
 
-use crate::{
-    assembler::backends::{Backend, Register},
-    lexer::token::{Condition, Keyword, Operation, Span, Token, TokenSpan},
-};
+use crate::lexer::token::{Condition, Keyword, Operation, Register, Span, Token, TokenSpan};
 use anyhow::Result;
 use smc_macros::match_keywords;
 use thiserror::Error;
@@ -14,7 +11,6 @@ pub struct Lexer<'a> {
     input: &'a [u8],
     pos: usize,
     finished: bool,
-    backend: &'a Backend,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -36,15 +32,17 @@ pub enum LexerError {
 
     #[error("Invalid ISA code `{1}`")]
     InvalidIsaCode(Span, String),
+
+    #[error("Invalid register number `{1}`")]
+    InvalidRegisterNumber(Span, String),
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str, backend: &'a Backend) -> Self {
+    pub fn new(input: &'a str) -> Self {
         Self {
             input: input.as_bytes(),
             pos: 0,
             finished: false,
-            backend,
         }
     }
 
@@ -174,7 +172,7 @@ impl<'a> Lexer<'a> {
                 Some(b'\'' | b'"') => match self.peek(1) {
                     Some(b'\'' | b'"') => {
                         let token = TokenSpan::new(
-                        Token::Number(char_to_isa_code(self.advance().expect("Should be impossible for a character to not exist after checking for the character after")).ok_or(LexerError::InvalidIsaCode(Span::new(start, self.pos), String::from("Invalid ISA code")))? as f32),
+                        Token::Number(char_to_isa_code(self.advance().expect("Should be impossible for a character to not exist after checking for the character after")).ok_or(LexerError::InvalidIsaCode(Span::new(start, self.pos), String::from("Invalid ISA code")))? as f64),
                             Span::new(start, self.pos),
                         );
 
@@ -198,7 +196,7 @@ impl<'a> Lexer<'a> {
                 ),
                 Some(b'0'..=b'9') | Some(b'-') => {
                     self.pos -= 1;
-                    let value: f32 = self.read_number()?;
+                    let value: f64 = self.read_number()?;
                     TokenSpan::new(Token::Number(value), Span::new(start, self.pos))
                 }
                 None => TokenSpan {
@@ -213,7 +211,6 @@ impl<'a> Lexer<'a> {
                     while let Some(b) = self.peek(0) {
                         if b.is_ascii_digit() {
                             self.advance();
-                            // Check for overflow before multiplication
                             if let Some(new_val) = reg_num
                                 .checked_mul(10)
                                 .and_then(|v| v.checked_add(b - b'0'))
@@ -227,6 +224,8 @@ impl<'a> Lexer<'a> {
                         }
                     }
 
+                    let span = Span::new(start, self.pos);
+
                     if self
                         .peek(0)
                         .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
@@ -236,29 +235,14 @@ impl<'a> Lexer<'a> {
                             Token::Identifier(self.read_identifier()),
                             Span::new(start, self.pos),
                         )
+                    } else if has_overflow {
+                        let raw: String = self.input[start..self.pos]
+                            .iter()
+                            .map(|&b| b as char)
+                            .collect();
+                        return Err(LexerError::InvalidRegisterNumber(span, raw));
                     } else {
-                        let register = if has_overflow {
-                            None
-                        } else {
-                            match &self.backend {
-                                Backend::BatPU2 => Register::batpu2(reg_num).ok(),
-                                Backend::TauAnalyzersNone => Register::tau(reg_num).ok(),
-                            }
-                        };
-
-                        match register {
-                            Some(reg) => TokenSpan::new(
-                                Token::Keyword(Keyword::Register(reg)),
-                                Span::new(start, self.pos),
-                            ),
-                            None => {
-                                self.pos = start;
-                                TokenSpan::new(
-                                    Token::Identifier(self.read_identifier()),
-                                    Span::new(start, self.pos),
-                                )
-                            }
-                        }
+                        TokenSpan::new(Token::Register(Register(reg_num)), span)
                     }
                 }
                 Some(b'a'..=b'z') | Some(b'A'..=b'Z') => {
