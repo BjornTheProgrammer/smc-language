@@ -1,44 +1,44 @@
 LDI R0 10 //Ball Position
 LDI R1 1 //dX
 LDI R2 16 //dY
-advance:
+.advance
 CPY R3 R0 //Gets a copy of ballPos to test
 OR R2 R2 //Gets R2 into flags
 ADD R3 R2 //Add dY
 ANI R3 240 //Gets rid of lower 4 bits
 ADI R3 16 //Gives 0 if 11110000
 SKP !0
-CAL bounceCeiling
+CAL .bounceCeiling
 CPY R3 R0 //New copy, testing for X
 ANI R3 16 //Only keeps fifth bit
 CPY R3 R0 //Fresh copy, does not update flags
 SKP 0 //Skip if fifth is zero
-JMP isOne
+JMP .isOne
 ADD R3 R1 //5th was a zero
 ANI R3 16 //Mask except 5th
 SKP 0
-CAL bounceSide //Jump to bounce side
-JMP continue
-isOne:
+CAL .bounceSide //Jump to bounce side
+JMP .continue
+.isOne
 ADD R3 R1 //5th was a 1
 ANI R3 16 //Mask except 5th
 SKP !0
-CAL bounceSide
-continue:
+CAL .bounceSide
+.continue
 LDI R3 240
-PST 0 R3
-PST 0 R0
+PST R0 R3
+PST R0 R0
 LDI R3 241
-PST 0 R3
+PST R0 R3
 ADD R0 R1 //Advance in X
 ADD R0 R2 //Advance in Y
-PST 0 R0
-JMP advance
-bounceCeiling:
+PST R0 R0
+JMP .advance
+.bounceCeiling
 INV R2
 INC R2
 RET
-bounceSide:
+.bounceSide
 INV R1
 INC R1
 RET

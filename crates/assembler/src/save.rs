@@ -317,7 +317,11 @@ pub fn save_file<P: AsRef<Path>>(output: P, data: Vec<u8>) -> Result<(), Compile
         .map_err(CompileError::WriteFileError)?;
 
     for word in data.chunks(2) {
-        writeln!(file, "{:08b}{:08b}", word[0], word[1]).map_err(CompileError::WriteFileError)?;
+        match word.get(1) {
+            Some(second_byte) => writeln!(file, "{:08b}{:08b}", word[0], second_byte)
+                .map_err(CompileError::WriteFileError)?,
+            None => writeln!(file, "{:08b}", word[0]).map_err(CompileError::WriteFileError)?,
+        }
     }
 
     Ok(())
