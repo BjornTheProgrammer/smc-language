@@ -108,7 +108,7 @@ pub fn compile<P: AsRef<Path>>(
 
     let source = fs::read_to_string(&input).map_err(|err| CompileError::ReadFileError(err))?;
 
-    let tokens: Vec<_> = Lexer::new(&source).into_iter().collect();
+    let tokens: Vec<_> = Lexer::new(&source, &target).into_iter().collect();
 
     if generate_debug_artifacts {
         fs::write(

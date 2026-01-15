@@ -21,6 +21,7 @@ enum Commands {
         output: String,
 
         /// Target backend
+        #[arg(short, long)]
         target: Backend,
 
         /// Generate debug artifacts

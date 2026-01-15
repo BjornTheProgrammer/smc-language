@@ -1,11 +1,10 @@
 use std::str::FromStr;
 
 use crate::{
-    assembler::backends::Register,
+    assembler::backends::{Backend, Register},
     lexer::token::{Condition, Keyword, Operation, Span, Token, TokenSpan},
 };
 use anyhow::Result;
-use arbitrary_int::u4;
 use smc_macros::match_keywords;
 use thiserror::Error;
 
@@ -15,6 +14,7 @@ pub struct Lexer<'a> {
     input: &'a [u8],
     pos: usize,
     finished: bool,
+    backend: &'a Backend,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -39,11 +39,12 @@ pub enum LexerError {
 }
 
 impl<'a> Lexer<'a> {
-    pub fn new(input: &'a str) -> Self {
+    pub fn new(input: &'a str, backend: &'a Backend) -> Self {
         Self {
             input: input.as_bytes(),
             pos: 0,
             finished: false,
+            backend,
         }
     }
 
@@ -158,23 +159,6 @@ impl<'a> Lexer<'a> {
             "carry" => Keyword::Condition(Condition::GreaterEqual),
             "notcarry" => Keyword::Condition(Condition::Less),
 
-            "r0" => Keyword::Register(Register::BatPU2(u4::from_u8(0))),
-            "r1" => Keyword::Register(Register::BatPU2(u4::from_u8(1))),
-            "r2" => Keyword::Register(Register::BatPU2(u4::from_u8(2))),
-            "r3" => Keyword::Register(Register::BatPU2(u4::from_u8(3))),
-            "r4" => Keyword::Register(Register::BatPU2(u4::from_u8(4))),
-            "r5" => Keyword::Register(Register::BatPU2(u4::from_u8(5))),
-            "r6" => Keyword::Register(Register::BatPU2(u4::from_u8(6))),
-            "r7" => Keyword::Register(Register::BatPU2(u4::from_u8(7))),
-            "r8" => Keyword::Register(Register::BatPU2(u4::from_u8(8))),
-            "r9" => Keyword::Register(Register::BatPU2(u4::from_u8(9))),
-            "r10" => Keyword::Register(Register::BatPU2(u4::from_u8(10))),
-            "r11" => Keyword::Register(Register::BatPU2(u4::from_u8(11))),
-            "r12" => Keyword::Register(Register::BatPU2(u4::from_u8(12))),
-            "r13" => Keyword::Register(Register::BatPU2(u4::from_u8(13))),
-            "r14" => Keyword::Register(Register::BatPU2(u4::from_u8(14))),
-            "r15" => Keyword::Register(Register::BatPU2(u4::from_u8(15))),
-
             "define" => Keyword::Define,
         );
 
@@ -221,6 +205,62 @@ impl<'a> Lexer<'a> {
                     token: Token::Eof,
                     span: Span::new(self.pos, self.pos),
                 },
+                Some(b'r' | b'R') if self.peek(0).is_some_and(|b| b.is_ascii_digit()) => {
+                    // Parse register number directly without string allocation
+                    let mut reg_num: u8 = 0;
+                    let mut has_overflow = false;
+
+                    while let Some(b) = self.peek(0) {
+                        if b.is_ascii_digit() {
+                            self.advance();
+                            // Check for overflow before multiplication
+                            if let Some(new_val) = reg_num
+                                .checked_mul(10)
+                                .and_then(|v| v.checked_add(b - b'0'))
+                            {
+                                reg_num = new_val;
+                            } else {
+                                has_overflow = true;
+                            }
+                        } else {
+                            break;
+                        }
+                    }
+
+                    if self
+                        .peek(0)
+                        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
+                    {
+                        self.pos = start;
+                        TokenSpan::new(
+                            Token::Identifier(self.read_identifier()),
+                            Span::new(start, self.pos),
+                        )
+                    } else {
+                        let register = if has_overflow {
+                            None
+                        } else {
+                            match &self.backend {
+                                Backend::BatPU2 => Register::batpu2(reg_num).ok(),
+                                Backend::TauAnalyzersNone => Register::tau(reg_num).ok(),
+                            }
+                        };
+
+                        match register {
+                            Some(reg) => TokenSpan::new(
+                                Token::Keyword(Keyword::Register(reg)),
+                                Span::new(start, self.pos),
+                            ),
+                            None => {
+                                self.pos = start;
+                                TokenSpan::new(
+                                    Token::Identifier(self.read_identifier()),
+                                    Span::new(start, self.pos),
+                                )
+                            }
+                        }
+                    }
+                }
                 Some(b'a'..=b'z') | Some(b'A'..=b'Z') => {
                     self.pos -= 1;
                     TokenSpan::new(
