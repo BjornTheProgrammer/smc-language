@@ -150,6 +150,7 @@ pub enum Operation {
     Bkl,
     Bkr,
     Skp,
+    Clr,
 }
 
 #[derive(Debug, PartialEq, Clone)]

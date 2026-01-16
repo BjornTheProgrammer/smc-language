@@ -148,6 +148,7 @@ impl<'a> Lexer<'a> {
             "Bkl" => Keyword::Operation(Operation::Bkl),
             "Bkr" => Keyword::Operation(Operation::Bkr),
             "Skp" => Keyword::Operation(Operation::Skp),
+            "Clr" => Keyword::Operation(Operation::Clr),
 
             "eq" => Keyword::Condition(Condition::Equal),
             "ne" => Keyword::Condition(Condition::NotEqual),

@@ -64,6 +64,7 @@ pub enum OperationWithArgs {
     Inv1(Register),
     Inc1(Register),
     Dec1(Register),
+    Clr1(Register),
 
     Ldi2(Register, Immediate),
     Adi2(Register, Immediate),

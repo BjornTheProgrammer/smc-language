@@ -436,6 +436,7 @@ impl Parser {
             Operation::Inv => self.parse_instruction(Reg1, span, |o| o.into_reg1(Inv1)),
             Operation::Inc => self.parse_instruction(Reg1, span, |o| o.into_reg1(Inc1)),
             Operation::Dec => self.parse_instruction(Reg1, span, |o| o.into_reg1(Dec1)),
+            Operation::Clr => self.parse_instruction(Reg1, span, |o| o.into_reg1(Clr1)),
 
             // Two-register instructions
             Operation::Rsh => match self.count_operands() {

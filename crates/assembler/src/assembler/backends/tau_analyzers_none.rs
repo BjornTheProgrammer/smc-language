@@ -112,6 +112,11 @@ pub fn assemble_operation(
 ) -> Result<Vec<u8>, AssemblerError> {
     let mut result = Vec::new();
 
+    let operation = match operation {
+        OperationWithArgs::Clr1(r1) => OperationWithArgs::Ani2(r1, Immediate::Value(0)),
+        _ => operation,
+    };
+
     match operation {
         // 2 operand instructions
         OperationWithArgs::Add2(r1, r2) => {
