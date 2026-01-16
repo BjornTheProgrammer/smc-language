@@ -1,13 +1,23 @@
 use arbitrary_int::u10;
 
 use crate::{
-    assembler::{AssemblerError, backends::Backend, get_address_value, get_immediate_value},
+    assembler::{
+        AssemblerError, LabelMap, backends::Backend, get_address_value, get_immediate_value,
+    },
     lexer::token::{Register, Span},
     parser::{
-        DefineMap, LabelMap,
+        DefineMap,
         operations::{Address, Immediate, OperationWithArgs, SkipFlag},
     },
 };
+
+pub fn instruction_byte_size(op: &OperationWithArgs) -> usize {
+    use OperationWithArgs::*;
+    match op {
+        Ldi2(..) | Adi2(..) | Cpi2(..) | Ani2(..) | Jmp(..) | Cal(..) => 2,
+        _ => 1,
+    }
+}
 
 fn assemble_2reg(
     span: &Span,

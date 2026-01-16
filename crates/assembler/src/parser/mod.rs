@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
@@ -15,7 +15,6 @@ pub mod operations;
 use operations::{Address, Immediate, Offset, OperationWithArgs, SpannedOperation};
 
 pub type DefineMap = HashMap<String, f64>;
-pub type LabelMap = HashMap<String, usize>;
 
 #[derive(Error, Debug, Clone)]
 pub enum ParserError {
@@ -38,10 +37,16 @@ pub enum ParserError {
     InvalidSkip(Span, String),
 }
 
+#[derive(Debug, Clone)]
+pub enum ParsedItem {
+    Label(String, Span),
+    Operation(SpannedOperation),
+}
+
+#[derive(Debug, Clone)]
 pub struct ParserResult {
     pub defines: DefineMap,
-    pub labels: LabelMap,
-    pub operations: Vec<SpannedOperation>,
+    pub items: Vec<ParsedItem>,
     pub errors: Vec<ParserError>,
 }
 
@@ -325,10 +330,9 @@ impl Parser {
 
     pub fn parse(mut self) -> ParserResult {
         let mut defines = DefineMap::new();
-        let mut labels = LabelMap::new();
-        let mut operations = Vec::new();
+        let mut labels: HashSet<String> = HashSet::new();
+        let mut items = Vec::new();
         let mut errors = Vec::new();
-        let mut instruction_count = 0;
 
         loop {
             let token = self.advance();
@@ -351,10 +355,13 @@ impl Parser {
                     token: Token::Label(name),
                     span,
                 }) => {
-                    if labels.contains_key(&name) {
-                        self.enter_recovery(ParserError::DuplicateLabel(span, name), &mut errors);
+                    if !labels.insert(name.clone()) {
+                        self.enter_recovery(
+                            ParserError::DuplicateLabel(span.clone(), name.clone()),
+                            &mut errors,
+                        );
                     } else {
-                        labels.insert(name, instruction_count);
+                        items.push(ParsedItem::Label(name, span));
                     }
                 }
 
@@ -377,8 +384,7 @@ impl Parser {
                     span,
                 }) => match self.parse_operation(op, &span) {
                     Ok(spanned_op) => {
-                        operations.push(spanned_op);
-                        instruction_count += 1;
+                        items.push(ParsedItem::Operation(spanned_op));
                     }
                     Err(e) => self.enter_recovery(e, &mut errors),
                 },
@@ -402,8 +408,7 @@ impl Parser {
 
         ParserResult {
             defines,
-            labels,
-            operations,
+            items,
             errors,
         }
     }

@@ -1,15 +1,19 @@
+use std::collections::HashMap;
+
 use thiserror::Error;
 
 use crate::{
     assembler::backends::Backend,
     lexer::token::{Condition, Span},
     parser::{
-        DefineMap, LabelMap, ParserError, ParserResult,
+        DefineMap, ParsedItem, ParserError, ParserResult,
         operations::{Address, Immediate, Offset, OperationWithArgs, SpannedOperation},
     },
 };
 
 pub mod backends;
+
+pub type LabelMap = HashMap<String, usize>;
 
 pub struct Assembler {
     parser_results: ParserResult,
@@ -63,22 +67,33 @@ impl Assembler {
             errors.push(AssemblerError::ParserError(error));
         }
 
-        let operations = std::mem::take(&mut self.parser_results.operations);
+        let items = std::mem::take(&mut self.parser_results.items);
 
-        if let Err(e) = self.target.insert_before(
-            &mut self.parser_results.defines,
-            &mut self.parser_results.labels,
-        ) {
+        if let Err(e) = self.target.insert_before(&mut self.parser_results.defines) {
             errors.push(e);
         }
 
+        let mut labels: LabelMap = HashMap::new();
+        let mut instruction_count = 0;
+        let mut operations = Vec::new();
+        for item in items {
+            match item {
+                ParsedItem::Label(name, _) => {
+                    labels.insert(name, instruction_count);
+                }
+                ParsedItem::Operation(spanned_op) => {
+                    let byte_size = self.target.instruction_byte_size(&spanned_op.op);
+                    instruction_count += byte_size;
+                    operations.push(spanned_op);
+                }
+            }
+        }
+
         for SpannedOperation { op, span } in operations {
-            match self.target.assemble_operation(
-                &self.parser_results.defines,
-                &self.parser_results.labels,
-                op,
-                span,
-            ) {
+            match self
+                .target
+                .assemble_operation(&self.parser_results.defines, &labels, op, span)
+            {
                 Ok(mut word) => bytes.append(&mut word),
                 Err(e) => errors.push(e),
             }
@@ -119,7 +134,7 @@ pub fn get_address_value(
             .ok_or(AssemblerError::DefineNotFound(span.clone(), identifier))?
             as i128,
         Address::Label(identifier) => *labels
-            .get(&identifier)
+            .get(identifier.as_str())
             .ok_or(AssemblerError::LabelNotFound(span.clone(), identifier))?
             as i128,
     })

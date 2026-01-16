@@ -3,9 +3,9 @@ use strum::VariantArray;
 use strum_macros::VariantArray;
 
 use crate::{
-    assembler::AssemblerError,
+    assembler::{AssemblerError, LabelMap},
     lexer::token::{Register, Span},
-    parser::{DefineMap, LabelMap, operations::OperationWithArgs},
+    parser::{DefineMap, operations::OperationWithArgs},
 };
 
 pub mod batpu2_mattbatwings_none;
@@ -18,13 +18,9 @@ pub enum Backend {
 }
 
 impl Backend {
-    pub fn insert_before(
-        &self,
-        defines: &mut DefineMap,
-        labels: &mut LabelMap,
-    ) -> Result<(), AssemblerError> {
+    pub fn insert_before(&self, defines: &mut DefineMap) -> Result<(), AssemblerError> {
         match self {
-            Backend::BatPU2 => batpu2_mattbatwings_none::insert_before(defines, labels),
+            Backend::BatPU2 => batpu2_mattbatwings_none::insert_before(defines),
             Backend::TauAnalyzersNone => Ok(()),
         }
     }
@@ -45,6 +41,13 @@ impl Backend {
             Backend::TauAnalyzersNone => {
                 tau_analyzers_none::assemble_operation(defines, labels, op, span)
             }
+        }
+    }
+
+    pub fn instruction_byte_size(&self, op: &OperationWithArgs) -> usize {
+        match self {
+            Backend::BatPU2 => batpu2_mattbatwings_none::instruction_byte_size(op),
+            Backend::TauAnalyzersNone => tau_analyzers_none::instruction_byte_size(op),
         }
     }
 }

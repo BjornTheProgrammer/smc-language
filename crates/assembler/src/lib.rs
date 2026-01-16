@@ -138,20 +138,9 @@ pub fn compile<P: AsRef<Path>>(
 
     if generate_debug_artifacts {
         fs::write(
-            "operations.txt",
+            "items.txt",
             parsed
-                .operations
-                .iter()
-                .map(|parsed| format!("{:?}", parsed))
-                .collect::<Vec<String>>()
-                .join("\n"),
-        )
-        .map_err(|err| CompileError::WriteFileError(err))?;
-
-        fs::write(
-            "labels.txt",
-            parsed
-                .labels
+                .items
                 .iter()
                 .map(|parsed| format!("{:?}", parsed))
                 .collect::<Vec<String>>()

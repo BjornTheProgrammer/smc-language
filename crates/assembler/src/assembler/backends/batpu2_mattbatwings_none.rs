@@ -2,19 +2,17 @@ use arbitrary_int::{i4, u10};
 
 use crate::{
     assembler::{
-        AssemblerError, backends::Backend, get_address_value, get_immediate_value, get_offset_value,
+        AssemblerError, LabelMap, backends::Backend, get_address_value, get_immediate_value,
+        get_offset_value,
     },
     lexer::token::{Condition, Register, Span},
     parser::{
-        DefineMap, LabelMap,
+        DefineMap,
         operations::{Immediate, OperationWithArgs},
     },
 };
 
-pub fn insert_before(
-    defines: &mut DefineMap,
-    _labels: &mut LabelMap,
-) -> Result<(), AssemblerError> {
+pub fn insert_before(defines: &mut DefineMap) -> Result<(), AssemblerError> {
     let ports = [
         "pixel_x",
         "pixel_y",
@@ -38,6 +36,12 @@ pub fn insert_before(
     }
 
     Ok(())
+}
+
+pub fn instruction_byte_size(op: &OperationWithArgs) -> usize {
+    match op {
+        _ => 1,
+    }
 }
 
 pub fn assemble_operation(
