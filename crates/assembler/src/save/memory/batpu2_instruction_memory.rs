@@ -1,6 +1,9 @@
 use mc_schem::{Region, Schematic};
 
-use crate::{CompileError, save::memory::make_block};
+use crate::{
+    CompileError,
+    save::{convert::convert_to_mc, memory::make_block},
+};
 
 fn generate_instruction_positions() -> Vec<[i32; 3]> {
     let mem_start_pos = [-4, -1, 2];
@@ -38,7 +41,7 @@ fn generate_instruction_positions() -> Vec<[i32; 3]> {
 fn write_instructions(
     region: &mut Region,
     pos_list: &[[i32; 3]],
-    lines: &[String],
+    lines: &[&str],
     offset: [i32; 3],
 ) {
     for (address, line) in lines.iter().enumerate() {
@@ -84,15 +87,13 @@ fn write_instructions(
     }
 }
 
-pub fn make_schematic(data: &[u8]) -> Result<Schematic, CompileError> {
-    let mut lines: Vec<String> = Vec::new();
-    for word in data.chunks(2) {
-        lines.push(format!("{:08b}{:08b}", word[0], word[1]));
-    }
+pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
+    let binding = convert_to_mc(data).map_err(CompileError::FormatError)?;
+    let mut lines = binding.lines().collect::<Vec<&str>>();
 
     // Pad to 1024 lines
     while lines.len() < 1024 {
-        lines.push("0000000000000000".to_string());
+        lines.push("0000000000000000");
     }
 
     let offset = [-130, -50, -80];

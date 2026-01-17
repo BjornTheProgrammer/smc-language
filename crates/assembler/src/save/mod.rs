@@ -30,7 +30,7 @@ pub fn save_file<P: AsRef<Path>>(
             None => return Err(CompileError::MissingFormat),
         };
 
-        let schematic = format.make_schematic(&data)?;
+        let schematic = format.make_schematic(data)?;
 
         schematic
             .save_to_file(&output.display().to_string())

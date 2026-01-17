@@ -6,7 +6,7 @@ pub fn convert_to_mc(input: Vec<u8>) -> Result<String, std::fmt::Error> {
     let mut output = String::new();
     for byte in bytes {
         let byte1 = byte[0];
-        let byte2 = byte[1];
+        let byte2 = byte.get(1).unwrap_or(&0u8);
         writeln!(output, "{:08b}{:08b}", byte1, byte2)?;
     }
     Ok(output)

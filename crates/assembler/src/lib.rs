@@ -30,7 +30,9 @@ pub enum CompileError {
     SchematicSaveFailed(#[from] mc_schem::Error),
     #[error("Unsupported file type")]
     UnsupportedFileType,
-    #[error("Missing format")]
+    #[error(
+        "Missing format when generating schematic, specify format with `--format <FORMAT NAME>`"
+    )]
     MissingFormat,
 }
 

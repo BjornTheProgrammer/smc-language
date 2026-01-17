@@ -12,7 +12,7 @@ pub enum Format {
 }
 
 impl Format {
-    pub fn make_schematic(&self, data: &[u8]) -> Result<Schematic, CompileError> {
+    pub fn make_schematic(&self, data: Vec<u8>) -> Result<Schematic, CompileError> {
         match self {
             Format::ArcMemoryHexSerial => todo!("Still need to implement"),
             Format::Batpu2InstructionMemory => batpu2_instruction_memory::make_schematic(data),
