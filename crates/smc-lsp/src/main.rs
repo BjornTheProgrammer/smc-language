@@ -229,7 +229,10 @@ impl LanguageServer for Backend {
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: format!("**define** `{}`\n\nValue: `{}`", name, value),
+                        value: format!(
+                            "**define** `{}`\n\nValue: `{}` (dec) | `0b{:b}` (bin) | `0x{:X}` (hex)",
+                            name, value, *value as i64, *value as i64
+                        ),
                     }),
                     range: None,
                 }));
@@ -240,7 +243,10 @@ impl LanguageServer for Backend {
                 return Ok(Some(Hover {
                     contents: HoverContents::Markup(MarkupContent {
                         kind: MarkupKind::Markdown,
-                        value: format!("**label** `.{}`\n\nAddress: `{}`", name, address),
+                        value: format!(
+                            "**label** `.{}`\n\nAddress: `{}` (dec) | `0b{:b}` (bin) | `0x{:X}` (hex)",
+                            name, address, address, address
+                        ),
                     }),
                     range: None,
                 }));
