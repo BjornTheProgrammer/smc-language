@@ -283,8 +283,14 @@ impl Parser {
             }) => Ok(Some(Offset::Value(n as i128))),
             Ok(TokenSpan {
                 token: Token::Identifier(id),
-                ..
-            }) => Ok(Some(Offset::Define(id))),
+                span,
+            }) => {
+                self.define_references
+                    .entry(id.clone())
+                    .or_insert_with(Vec::new)
+                    .push(span);
+                Ok(Some(Offset::Define(id)))
+            }
             Ok(_) => Ok(None),
             Err(e) => Err(ParserError::SyntaxError(e)),
         }
