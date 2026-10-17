@@ -31,3 +31,11 @@ fn compiles_ball() {
 fn compiles_tetris() {
     test_compilation("tetris");
 }
+
+#[test]
+fn clr_is_laid_out_as_two_bytes() {
+    // CLR lowers to the 2 byte ANI r 0, so the label after it is at address 2
+    let result = compile("CLR R0\n.after\nJMP .after", &TauAnalyzersNone, false)
+        .expect("compilation should succeed");
+    assert_eq!(result, [0b1101_00_11, 0, 0b1110_00_00, 2]);
+}
