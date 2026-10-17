@@ -8,12 +8,15 @@
 use crate::{
     assembler::{
         AssemblerError,
-        backends::{Lowered, Machine, Resolver, Target},
+        backends::{
+            Lowered, Machine, Resolver, Target,
+            args::{Args, MnemonicTable, decode},
+        },
     },
-    lexer::token::{Register, Span},
+    lexer::token::{Condition, Register, Span},
     parser::{
         ParsedItem,
-        operations::{Address, Immediate, OperationWithArgs, PredicateFlag},
+        operations::{Address, Immediate, Operand},
     },
 };
 
@@ -32,6 +35,127 @@ impl Target for LyminalUniNone {
 
     fn lower(&self, items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
         lower_program(items)
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum Op {
+    Add3(Register, Register, Register),
+    AddI3(Register, Register, Immediate),
+    Sub3(Register, Register, Register),
+    SubI3(Register, Register, Immediate),
+    And3(Register, Register, Register),
+    AndI3(Register, Register, Immediate),
+    Mov2(Register, Register),
+    MovI2(Register, Immediate),
+    Ldi2(Register, Immediate),
+    Lsi2(Register, Immediate),
+    Not2(Register, Register),
+    Inc1(Register),
+    Inc2(Register, Register),
+    Dec1(Register),
+    Dec2(Register, Register),
+    Mld2(Register, Register),
+    Mst2(Register, Register),
+    MstI2(Register, Immediate),
+    Swp3(Register, Register, Register),
+    SwpI3(Register, Register, Immediate),
+    Jmp(Address),
+    JmpR(Register),
+    Jal2(Register, Register),
+    JalI2(Register, Address),
+    Pc1(Register),
+    Pred(PredicateFlag),
+}
+
+#[derive(Debug, PartialEq, Clone)]
+enum PredicateFlag {
+    Carry,
+    NotCarry,
+    Zero,
+    NotZero,
+}
+
+const MNEMONICS: &MnemonicTable<Op> = &[
+    ("add", |a| register_or_immediate(a, Op::Add3, Op::AddI3)),
+    ("sub", |a| register_or_immediate(a, Op::Sub3, Op::SubI3)),
+    ("and", |a| register_or_immediate(a, Op::And3, Op::AndI3)),
+    ("mov", |a| {
+        let x = a.register(0)?;
+        match a.is_register(1) {
+            true => Ok(Op::Mov2(x, a.register(1)?)),
+            false => Ok(Op::MovI2(x, a.immediate(1)?)),
+        }
+    }),
+    ("ldi", |a| Ok(Op::Ldi2(a.register(0)?, a.immediate(1)?))),
+    ("lsi", |a| Ok(Op::Lsi2(a.register(0)?, a.immediate(1)?))),
+    ("not", |a| Ok(Op::Not2(a.register(0)?, a.register(1)?))),
+    ("inc", |a| match a.len() {
+        0..=1 => Ok(Op::Inc1(a.register(0)?)),
+        _ => Ok(Op::Inc2(a.register(0)?, a.register(1)?)),
+    }),
+    ("dec", |a| match a.len() {
+        0..=1 => Ok(Op::Dec1(a.register(0)?)),
+        _ => Ok(Op::Dec2(a.register(0)?, a.register(1)?)),
+    }),
+    ("mld", |a| {
+        Ok(Op::Mld2(a.register(0)?, a.memory_register(1)?))
+    }),
+    ("mst", |a| {
+        let x = a.memory_register(0)?;
+        match a.is_register(1) {
+            true => Ok(Op::Mst2(x, a.register(1)?)),
+            false => Ok(Op::MstI2(x, a.immediate(1)?)),
+        }
+    }),
+    ("swp", |a| {
+        let (x, y) = (a.register(0)?, a.memory_register(1)?);
+        match a.is_register(2) {
+            true => Ok(Op::Swp3(x, y, a.register(2)?)),
+            false => Ok(Op::SwpI3(x, y, a.immediate(2)?)),
+        }
+    }),
+    ("jmp", |a| match a.is_register(0) {
+        true => Ok(Op::JmpR(a.register(0)?)),
+        false => Ok(Op::Jmp(a.address(0)?)),
+    }),
+    ("jal", |a| {
+        let x = a.register(0)?;
+        match a.is_register(1) {
+            true => Ok(Op::Jal2(x, a.register(1)?)),
+            false => Ok(Op::JalI2(x, a.address(1)?)),
+        }
+    }),
+    ("pc", |a| Ok(Op::Pc1(a.register(0)?))),
+    ("pic", |_| Ok(Op::Pred(PredicateFlag::Carry))),
+    ("pnc", |_| Ok(Op::Pred(PredicateFlag::NotCarry))),
+    ("piz", |_| Ok(Op::Pred(PredicateFlag::Zero))),
+    ("pnz", |_| Ok(Op::Pred(PredicateFlag::NotZero))),
+];
+
+/// `op x y z` or `op x y imm`, depending on the last operand
+fn register_or_immediate(
+    args: &Args,
+    register: fn(Register, Register, Register) -> Op,
+    immediate: fn(Register, Register, Immediate) -> Op,
+) -> Result<Op, AssemblerError> {
+    let (x, y) = (args.register(0)?, args.register(1)?);
+    match args.is_register(2) {
+        true => Ok(register(x, y, args.register(2)?)),
+        false => Ok(immediate(x, y, args.immediate(2)?)),
+    }
+}
+
+/// Registers by name, X, Y, Z and A, as well as `rN`. `x`, `y` and `a` are parsed as names
+/// and `z` as a condition, so they're only registers where a register is expected.
+fn registers(operand: &Operand) -> Option<Register> {
+    match operand {
+        Operand::Register(register) => Some(*register),
+        Operand::Name(name) if name.eq_ignore_ascii_case("x") => Some(Register(X)),
+        Operand::Name(name) if name.eq_ignore_ascii_case("y") => Some(Register(Y)),
+        Operand::Name(name) if name.eq_ignore_ascii_case("a") => Some(Register(A)),
+        Operand::Condition(Condition::Zero) => Some(Register(Z)),
+        _ => None,
     }
 }
 
@@ -95,7 +219,7 @@ impl Base {
 #[derive(Debug, Clone)]
 enum Step {
     /// Another operation, lowered in turn
-    Lower(OperationWithArgs),
+    Lower(Op),
     /// A machine instruction
     Emit(Base),
 }
@@ -122,18 +246,14 @@ fn small_literal(imm: &Immediate, range: std::ops::RangeInclusive<i128>) -> Opti
 
 /// Lowers an operation all the way to machine instructions. `a_mode` is whether the
 /// instruction before it wrote A.
-fn lower_fully(
-    op: &OperationWithArgs,
-    a_mode: bool,
-    span: &Span,
-) -> Result<Vec<Base>, AssemblerError> {
+fn lower_fully(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Base>, AssemblerError> {
     let mut out = Vec::new();
     expand(op, a_mode, span, &mut out, 0)?;
     Ok(out)
 }
 
 fn expand(
-    op: &OperationWithArgs,
+    op: &Op,
     initial_a_mode: bool,
     span: &Span,
     out: &mut Vec<Base>,
@@ -158,8 +278,8 @@ fn expand(
 /// Lowers an operation one level, into machine instructions or other operations.
 /// Only literal immediates may affect the choice, so the result has the same size before
 /// and after labels and defines are resolved.
-fn lower(op: &OperationWithArgs, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError> {
-    use OperationWithArgs::*;
+fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError> {
+    use Op::*;
     let r = |register: Register| reg(span, register);
     let a = Register(A);
 
@@ -309,22 +429,16 @@ fn lower(op: &OperationWithArgs, a_mode: bool, span: &Span) -> Result<Vec<Step>,
             };
             vec![Emit(Base::Op(MEM, f, f, f))]
         }
-        _ => {
-            return Err(AssemblerError::UnsupportedOperation(
-                span.clone(),
-                op.clone(),
-            ));
-        }
     })
 }
 
-fn writes_to_a(op: &OperationWithArgs) -> bool {
+fn writes_to_a(op: &Op) -> bool {
     destination(op) == Some(Register(A))
 }
 
 /// Register written by the operation. Excludes JAL and PC, which may not use A at all.
-fn destination(op: &OperationWithArgs) -> Option<Register> {
-    use OperationWithArgs::*;
+fn destination(op: &Op) -> Option<Register> {
+    use Op::*;
     match op {
         Add3(x, ..)
         | AddI3(x, ..)
@@ -349,8 +463,8 @@ fn destination(op: &OperationWithArgs) -> Option<Register> {
 }
 
 /// Registers read by the operation. Excludes JMP, JAL and PC, which may not use A at all.
-fn sources(op: &OperationWithArgs) -> Vec<Register> {
-    use OperationWithArgs::*;
+fn sources(op: &Op) -> Vec<Register> {
+    use Op::*;
     match op {
         Add3(_, y, z) | Sub3(_, y, z) | And3(_, y, z) | Swp3(_, y, z) => vec![*y, *z],
         AddI3(_, y, _) | SubI3(_, y, _) | AndI3(_, y, _) | SwpI3(_, y, _) => vec![*y],
@@ -361,8 +475,8 @@ fn sources(op: &OperationWithArgs) -> Vec<Register> {
     }
 }
 
-fn uses_a_in_jump(op: &OperationWithArgs) -> bool {
-    use OperationWithArgs::*;
+fn uses_a_in_jump(op: &Op) -> bool {
+    use Op::*;
     let a = Register(A);
     match op {
         JmpR(x) | JalI2(x, _) | Pc1(x) => *x == a,
@@ -375,13 +489,13 @@ fn uses_a_in_jump(op: &OperationWithArgs) -> bool {
 fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
     let mut lowered = Vec::new();
     let mut errors = Vec::new();
-    let mut previous: Option<&OperationWithArgs> = None;
+    let mut previous: Option<Op> = None;
     let mut previous_span: Option<&Span> = None;
 
     for item in items {
-        let spanned = match item {
+        let instruction = match item {
             ParsedItem::Label(name, _) => {
-                if let (Some(op), Some(span)) = (previous, previous_span) {
+                if let (Some(op), Some(span)) = (&previous, previous_span) {
                     if writes_to_a(op) {
                         errors.push(invalid(
                             span,
@@ -393,10 +507,18 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
                 previous = None;
                 continue;
             }
-            ParsedItem::Operation(spanned) => spanned,
+            ParsedItem::Instruction(instruction) => instruction,
         };
-        let (op, span) = (&spanned.op, &spanned.span);
-        let a_mode = previous.is_some_and(writes_to_a);
+        let span = &instruction.span;
+        let decoded = match decode(MNEMONICS, registers, instruction) {
+            Ok(op) => op,
+            Err(error) => {
+                errors.push(error);
+                continue;
+            }
+        };
+        let op = &decoded;
+        let a_mode = previous.as_ref().is_some_and(writes_to_a);
         let reads_a = sources(op).contains(&Register(A));
 
         if uses_a_in_jump(op) {
@@ -420,7 +542,7 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
                     ));
                 }
 
-                if matches!(previous, Some(OperationWithArgs::Pred(_))) && bases.len() != 1 {
+                if matches!(previous, Some(Op::Pred(_))) && bases.len() != 1 {
                     errors.push(invalid(
                         span,
                         "a predicated line must assemble to a single instruction",
@@ -435,7 +557,7 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
             Err(error) => errors.push(error),
         }
 
-        previous = Some(op);
+        previous = Some(decoded);
         previous_span = Some(span);
     }
 

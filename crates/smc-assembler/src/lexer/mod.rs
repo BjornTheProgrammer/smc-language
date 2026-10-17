@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::lexer::token::{Condition, Keyword, Operation, Register, Span, Token, TokenSpan};
+use crate::lexer::token::{Condition, Keyword, Register, Span, Token, TokenSpan};
 use anyhow::Result;
 use smc_macros::match_keywords;
 use thiserror::Error;
@@ -117,58 +117,25 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    pub fn next_token(&mut self) -> Result<TokenSpan, LexerError> {
+    /// Skips whitespace and comments, returning whether they contained a line break
+    fn skip_trivia(&mut self) -> bool {
+        let start = self.pos;
         self.skip_whitespace();
         self.skip_comments();
+        self.input[start..self.pos].contains(&b'\n')
+    }
+
+    pub fn next_token(&mut self) -> Result<TokenSpan, LexerError> {
+        if self.skip_trivia() {
+            return Ok(TokenSpan::new(
+                Token::Newline,
+                Span::new(self.pos, self.pos),
+            ));
+        }
 
         let start = self.pos;
 
         let keyword: Option<_> = match_keywords!(
-            "Nop" => Keyword::Operation(Operation::Nop),
-            "Hlt" => Keyword::Operation(Operation::Hlt),
-            "Add" => Keyword::Operation(Operation::Add),
-            "Sub" => Keyword::Operation(Operation::Sub),
-            "Nor" => Keyword::Operation(Operation::Nor),
-            "And" => Keyword::Operation(Operation::And),
-            "Xor" => Keyword::Operation(Operation::Xor),
-            "Rsh" => Keyword::Operation(Operation::Rsh),
-            "Ldi" => Keyword::Operation(Operation::Ldi),
-            "Adi" => Keyword::Operation(Operation::Adi),
-            "Jmp" => Keyword::Operation(Operation::Jmp),
-            "Brh" => Keyword::Operation(Operation::Brh),
-            "Cal" => Keyword::Operation(Operation::Cal),
-            "Ret" => Keyword::Operation(Operation::Ret),
-            "Lod" => Keyword::Operation(Operation::Lod),
-            "Str" => Keyword::Operation(Operation::Str),
-            "Cmp" => Keyword::Operation(Operation::Cmp),
-            "Mov" => Keyword::Operation(Operation::Mov),
-            "Lsh" => Keyword::Operation(Operation::Lsh),
-            "Inc" => Keyword::Operation(Operation::Inc),
-            "Dec" => Keyword::Operation(Operation::Dec),
-            "Not" => Keyword::Operation(Operation::Not),
-            "Neg" => Keyword::Operation(Operation::Neg),
-            "Or" => Keyword::Operation(Operation::Or),
-            "Cpy" => Keyword::Operation(Operation::Cpy),
-            "Adc" => Keyword::Operation(Operation::Adc),
-            "Mld" => Keyword::Operation(Operation::Mld),
-            "Mst" => Keyword::Operation(Operation::Mst),
-            "Pld" => Keyword::Operation(Operation::Pld),
-            "Pst" => Keyword::Operation(Operation::Pst),
-            "Inv" => Keyword::Operation(Operation::Inv),
-            "Cpi" => Keyword::Operation(Operation::Cpi),
-            "Ani" => Keyword::Operation(Operation::Ani),
-            "Bkl" => Keyword::Operation(Operation::Bkl),
-            "Bkr" => Keyword::Operation(Operation::Bkr),
-            "Skp" => Keyword::Operation(Operation::Skp),
-            "Clr" => Keyword::Operation(Operation::Clr),
-            "Lsi" => Keyword::Operation(Operation::Lsi),
-            "Swp" => Keyword::Operation(Operation::Swp),
-            "Jal" => Keyword::Operation(Operation::Jal),
-            "Pc" => Keyword::Operation(Operation::Pc),
-            "Pic" => Keyword::Operation(Operation::Pic),
-            "Pnc" => Keyword::Operation(Operation::Pnc),
-            "Piz" => Keyword::Operation(Operation::Piz),
-            "Pnz" => Keyword::Operation(Operation::Pnz),
 
             "eq" => Keyword::Condition(Condition::Equal),
             "ne" => Keyword::Condition(Condition::NotEqual),
@@ -232,7 +199,8 @@ impl<'a> Lexer<'a> {
                     Span::new(start, self.pos),
                 ),
                 Some(b'-') => {
-                    if self.skip_whitespace() {
+                    // Leave the whitespace, which may be a line break, for the next token
+                    if self.peek(0).is_some_and(|b| b.is_ascii_whitespace()) {
                         TokenSpan::new(
                             Token::Keyword(Keyword::Condition(Condition::Not)),
                             Span::new(start, start),

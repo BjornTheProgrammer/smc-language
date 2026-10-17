@@ -7,7 +7,7 @@ use crate::{
     lexer::token::{Condition, Span},
     parser::{
         DefineMap, DefineSpanMap, LabelSpanMap, ParserError, ParserResult, ReferenceMap,
-        operations::{Address, Immediate, Offset, OperationWithArgs},
+        operations::{Address, Immediate, Offset},
     },
 };
 
@@ -32,8 +32,8 @@ pub enum AssemblerError {
     #[error("{0}")]
     ParserError(#[from] ParserError),
 
-    #[error("AssemblerError: Unsupported operation {1:?}")]
-    UnsupportedOperation(Span, OperationWithArgs),
+    #[error("AssemblerError: Unknown instruction `{1}` for this target")]
+    UnsupportedOperation(Span, String),
 
     #[error("AssemblerError: Invalid register `{1}`")]
     InvalidRegister(Span, u8),

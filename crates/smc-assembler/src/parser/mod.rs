@@ -2,17 +2,14 @@ use std::collections::{HashMap, HashSet};
 
 use thiserror::Error;
 
-use crate::{
-    lexer::{
-        LexerError,
-        token::{Condition, Keyword, Operation, Register, Span, Token, TokenSpan},
-    },
-    parser::operations::{PredicateFlag, SkipFlag},
+use crate::lexer::{
+    LexerError,
+    token::{Keyword, Span, Token, TokenSpan},
 };
 
 pub mod operations;
 
-use operations::{Address, Immediate, Offset, OperationWithArgs, SpannedOperation};
+use operations::{Instruction, Operand, SpannedOperand};
 
 pub type DefineMap = HashMap<String, f64>;
 pub type DefineSpanMap = HashMap<String, Span>;
@@ -35,15 +32,12 @@ pub enum ParserError {
 
     #[error("Semantic Error: Unexpected end of file")]
     UnexpectedEof(Span),
-
-    #[error("Semantic Error: Invalid skip `{1}`")]
-    InvalidSkip(Span, String),
 }
 
 #[derive(Debug, Clone)]
 pub enum ParsedItem {
     Label(String, Span),
-    Operation(SpannedOperation),
+    Instruction(Instruction),
 }
 
 #[derive(Debug, Clone)]
@@ -57,6 +51,9 @@ pub struct ParserResult {
     pub label_references: ReferenceMap,
 }
 
+/// Parses the syntax shared by every target: labels, defines, and instructions made of a
+/// mnemonic and operands. Each statement ends at a line break. What a mnemonic means, and
+/// which operands it takes, is up to the target.
 #[derive(Debug, Clone)]
 pub struct Parser {
     tokens: Vec<Result<TokenSpan, LexerError>>,
@@ -65,57 +62,6 @@ pub struct Parser {
     recovery_mode: bool,
     define_references: ReferenceMap,
     label_references: ReferenceMap,
-}
-
-/// Instruction format types for cleaner parsing
-#[derive(Debug, Clone, Copy)]
-enum InstructionFormat {
-    /// No operands: NOP, HLT, RET
-    NoOperand,
-    /// Single register: INC r1, DEC r1
-    Reg1,
-    /// Two registers: RSH r1 r2, CMP r1 r2, MOV r1 r2
-    Reg2,
-    /// Three registers: ADD r1 r2 r3
-    Reg3,
-    /// Register + immediate: LDI r1 imm, ADI r1 imm
-    RegImm,
-    /// Address only: JMP addr, CAL addr
-    Addr,
-    /// Condition + address: BRH cond addr
-    CondAddr,
-    /// Two registers + optional offset: LOD r1 r2 [offset], STR r1 r2 [offset]
-    Reg2Offset,
-    /// Skip enum
-    Skip,
-    /// Two registers + immediate: ADD r1 r2 imm
-    Reg2Imm,
-    /// Register + address: JAL r1 addr
-    RegAddr,
-    /// Register + memory register: MLD r1 [r2]
-    RegMem,
-    /// Memory register + register: MST [r1] r2
-    MemReg,
-    /// Memory register + immediate: MST [r1] imm
-    MemImm,
-    /// Register + memory register + register: SWP r1 [r2] r3
-    RegMemReg,
-    /// Register + memory register + immediate: SWP r1 [r2] imm
-    RegMemImm,
-}
-
-/// Resolves a token to a register, including the Lyminal names X, Y, Z and A.
-/// `x`, `y` and `a` lex as identifiers and `z` as a condition, so they stay usable as
-/// define names and branch conditions everywhere a register isn't expected.
-fn token_to_register(token: &Token) -> Option<Register> {
-    match token {
-        Token::Register(r) => Some(*r),
-        Token::Keyword(Keyword::Condition(Condition::Zero)) => Some(Register(2)),
-        Token::Identifier(id) if id.eq_ignore_ascii_case("x") => Some(Register(0)),
-        Token::Identifier(id) if id.eq_ignore_ascii_case("y") => Some(Register(1)),
-        Token::Identifier(id) if id.eq_ignore_ascii_case("a") => Some(Register(3)),
-        _ => None,
-    }
 }
 
 impl Parser {
@@ -155,14 +101,13 @@ impl Parser {
         errors.push(error);
     }
 
-    fn is_sync_token(token: &Result<TokenSpan, LexerError>) -> bool {
+    /// Tokens that end a statement, and where parsing resumes after an error. A label later
+    /// on the same line is an operand, not a new label.
+    fn ends_statement(token: &Result<TokenSpan, LexerError>) -> bool {
         matches!(
             token,
             Ok(TokenSpan {
-                token: Token::Keyword(Keyword::Operation(_))
-                    | Token::Keyword(Keyword::Define)
-                    | Token::Label(_)
-                    | Token::Eof,
+                token: Token::Newline | Token::Keyword(Keyword::Define) | Token::Eof,
                 ..
             })
         )
@@ -184,78 +129,6 @@ impl Parser {
         }
     }
 
-    fn expect_with_span<T, F>(
-        &self,
-        offset: usize,
-        expected: &str,
-        extractor: F,
-    ) -> Result<(T, Span), ParserError>
-    where
-        F: FnOnce(&Token) -> Option<T>,
-    {
-        match self.peek(offset) {
-            Ok(TokenSpan { token, span }) => extractor(&token)
-                .map(|v| (v, span.clone()))
-                .ok_or_else(|| ParserError::ExpectedButReceived(span, expected.to_string(), token)),
-            Err(e) => Err(ParserError::SyntaxError(e)),
-        }
-    }
-
-    fn expect_register(&mut self, offset: usize) -> Result<Register, ParserError> {
-        self.expect(offset, "register (r0-r15)", token_to_register)
-    }
-
-    fn is_register(&self, offset: usize) -> bool {
-        matches!(self.peek(offset), Ok(TokenSpan { token, .. }) if token_to_register(&token).is_some())
-    }
-
-    fn is_token(&self, offset: usize, expected: &Token) -> bool {
-        matches!(self.peek(offset), Ok(TokenSpan { token, .. }) if token == *expected)
-    }
-
-    /// Offset of the operand following a memory operand at `offset`, which may be bracketed
-    fn offset_after_mem(&self, offset: usize) -> usize {
-        if self.is_token(offset, &Token::LBracket) {
-            offset + 3
-        } else {
-            offset + 1
-        }
-    }
-
-    fn take_register(&mut self) -> Result<Register, ParserError> {
-        let r = self.expect_register(0)?;
-        self.advance()?;
-        Ok(r)
-    }
-
-    fn take_immediate(&mut self) -> Result<Immediate, ParserError> {
-        let imm = self.expect_immediate(0)?;
-        self.advance()?;
-        Ok(imm)
-    }
-
-    fn take_address(&mut self) -> Result<Address, ParserError> {
-        let addr = self.expect_address(0)?;
-        self.advance()?;
-        Ok(addr)
-    }
-
-    /// Parses a memory register operand, `[r1]`. Brackets are optional so `MLD r1 r2` keeps working.
-    fn take_mem_register(&mut self) -> Result<Register, ParserError> {
-        if !self.is_token(0, &Token::LBracket) {
-            return self.take_register();
-        }
-
-        self.advance()?;
-        let r = self.take_register()?;
-        self.expect(0, "`]`", |token| match token {
-            Token::RBracket => Some(()),
-            _ => None,
-        })?;
-        self.advance()?;
-        Ok(r)
-    }
-
     fn expect_number(&mut self, offset: usize) -> Result<f64, ParserError> {
         self.expect(offset, "number", |token| match token {
             Token::Number(n) => Some(*n),
@@ -270,246 +143,8 @@ impl Parser {
         })
     }
 
-    fn expect_condition(&mut self, offset: usize) -> Result<Condition, ParserError> {
-        self.expect(offset, "condition (eq, ne, ge, lt)", |token| match token {
-            Token::Keyword(Keyword::Condition(Condition::Zero)) => Some(Condition::Equal),
-            Token::Keyword(Keyword::Condition(c)) => Some(c.clone()),
-            _ => None,
-        })
-    }
-
-    fn expect_address(&mut self, offset: usize) -> Result<Address, ParserError> {
-        let (address, span) = self.expect_with_span(
-            offset,
-            "address (number, label, or define)",
-            |token| match token {
-                Token::Number(n) => Some(Address::Value(*n as i128)),
-                Token::Label(l) => Some(Address::Label(l.clone())),
-                Token::Identifier(id) => Some(Address::Define(id.clone())),
-                _ => None,
-            },
-        )?;
-
-        match &address {
-            Address::Label(l) => {
-                self.label_references
-                    .entry(l.clone())
-                    .or_insert_with(Vec::new)
-                    .push(span);
-            }
-            Address::Define(id) => {
-                self.define_references
-                    .entry(id.clone())
-                    .or_insert_with(Vec::new)
-                    .push(span);
-            }
-            Address::Value(_) => {}
-        }
-
-        Ok(address)
-    }
-
-    fn expect_immediate(&mut self, offset: usize) -> Result<Immediate, ParserError> {
-        let (immediate, span) = self.expect_with_span(
-            offset,
-            "immediate (number or define)",
-            |token| match token {
-                Token::Number(n) => Some(Immediate::Value(*n as i128)),
-                Token::Identifier(id) => Some(Immediate::Define(id.clone())),
-                _ => None,
-            },
-        )?;
-
-        // Track reference if it's a define
-        if let Immediate::Define(ref id) = immediate {
-            self.define_references
-                .entry(id.clone())
-                .or_insert_with(Vec::new)
-                .push(span);
-        }
-
-        Ok(immediate)
-    }
-
-    fn try_skip(&mut self, offset: usize) -> Result<Option<SkipFlag>, ParserError> {
-        match self.peek(offset) {
-            Ok(TokenSpan {
-                token: Token::Keyword(Keyword::Condition(n)),
-                span,
-            }) => match n {
-                Condition::Not => Ok(Some(SkipFlag::Never)),
-                Condition::NotZero => Ok(Some(SkipFlag::IfNotZero)),
-                Condition::Negative => Ok(Some(SkipFlag::IfNegative)),
-                Condition::NotNegative => Ok(Some(SkipFlag::IfNotNegative)),
-                _ => Err(ParserError::InvalidSkip(span, format!("{:?}", n))),
-            },
-            Ok(TokenSpan {
-                token: Token::Number(0.0),
-                ..
-            }) => Ok(Some(SkipFlag::IfZero)),
-            Ok(_) => Ok(None),
-            Err(e) => Err(ParserError::SyntaxError(e)),
-        }
-    }
-
-    fn try_offset(&mut self, offset: usize) -> Result<Option<Offset>, ParserError> {
-        match self.peek(offset) {
-            Ok(TokenSpan {
-                token: Token::Number(n),
-                ..
-            }) => Ok(Some(Offset::Value(n as i128))),
-            Ok(TokenSpan {
-                token: Token::Identifier(id),
-                span,
-            }) => {
-                self.define_references
-                    .entry(id.clone())
-                    .or_insert_with(Vec::new)
-                    .push(span);
-                Ok(Some(Offset::Define(id)))
-            }
-            Ok(_) => Ok(None),
-            Err(e) => Err(ParserError::SyntaxError(e)),
-        }
-    }
-
-    fn count_operands(&mut self) -> usize {
-        let mut count = 0;
-        while !Self::is_sync_token(&self.peek(count)) {
-            count += 1;
-        }
-
-        count
-    }
-
-    /// Parse operands based on instruction format and construct the operation
-    fn parse_instruction(
-        &mut self,
-        format: InstructionFormat,
-        start_span: &Span,
-        constructor: impl FnOnce(ParsedOperands) -> OperationWithArgs,
-    ) -> Result<SpannedOperation, ParserError> {
-        let operands = self.parse_operands(format)?;
-        let span = self.make_span(start_span);
-        Ok(SpannedOperation::new(constructor(operands), span))
-    }
-
-    fn parse_operands(&mut self, format: InstructionFormat) -> Result<ParsedOperands, ParserError> {
-        match format {
-            InstructionFormat::NoOperand => Ok(ParsedOperands::None),
-
-            InstructionFormat::Reg1 => {
-                let r1 = self.expect_register(0)?;
-                self.advance()?;
-                Ok(ParsedOperands::Reg1(r1))
-            }
-
-            InstructionFormat::Reg2 => {
-                let r1 = self.expect_register(0)?;
-                let r2 = self.expect_register(1)?;
-                self.advance()?;
-                self.advance()?;
-                Ok(ParsedOperands::Reg2(r1, r2))
-            }
-
-            InstructionFormat::Reg3 => {
-                let r1 = self.expect_register(0)?;
-                let r2 = self.expect_register(1)?;
-                let r3 = self.expect_register(2)?;
-                self.advance()?;
-                self.advance()?;
-                self.advance()?;
-                Ok(ParsedOperands::Reg3(r1, r2, r3))
-            }
-
-            InstructionFormat::RegImm => {
-                let r1 = self.expect_register(0)?;
-                let imm = self.expect_immediate(1)?;
-                self.advance()?;
-                self.advance()?;
-                Ok(ParsedOperands::RegImm(r1, imm))
-            }
-
-            InstructionFormat::Addr => {
-                let addr = self.expect_address(0)?;
-                self.advance()?;
-                Ok(ParsedOperands::Addr(addr))
-            }
-
-            InstructionFormat::CondAddr => {
-                let cond = self.expect_condition(0)?;
-                let addr = self.expect_address(1)?;
-                self.advance()?;
-                self.advance()?;
-                Ok(ParsedOperands::CondAddr(cond, addr))
-            }
-
-            InstructionFormat::Reg2Offset => {
-                let r1 = self.expect_register(0)?;
-                let r2 = self.expect_register(1)?;
-                let offset = self.try_offset(2)?;
-                self.advance()?;
-                self.advance()?;
-                if offset.is_some() {
-                    self.advance()?;
-                }
-                Ok(ParsedOperands::Reg2Offset(r1, r2, offset))
-            }
-            InstructionFormat::Skip => {
-                let skip = self.try_skip(0)?;
-                let skip = match skip {
-                    Some(skip) => skip,
-                    None => SkipFlag::Never,
-                };
-                self.advance()?;
-                Ok(ParsedOperands::Skip(skip))
-            }
-
-            InstructionFormat::Reg2Imm => {
-                let r1 = self.take_register()?;
-                let r2 = self.take_register()?;
-                let imm = self.take_immediate()?;
-                Ok(ParsedOperands::Reg2Imm(r1, r2, imm))
-            }
-
-            InstructionFormat::RegAddr => {
-                let r1 = self.take_register()?;
-                let addr = self.take_address()?;
-                Ok(ParsedOperands::RegAddr(r1, addr))
-            }
-
-            InstructionFormat::RegMem => {
-                let r1 = self.take_register()?;
-                let r2 = self.take_mem_register()?;
-                Ok(ParsedOperands::Reg2(r1, r2))
-            }
-
-            InstructionFormat::MemReg => {
-                let r1 = self.take_mem_register()?;
-                let r2 = self.take_register()?;
-                Ok(ParsedOperands::Reg2(r1, r2))
-            }
-
-            InstructionFormat::MemImm => {
-                let r1 = self.take_mem_register()?;
-                let imm = self.take_immediate()?;
-                Ok(ParsedOperands::RegImm(r1, imm))
-            }
-
-            InstructionFormat::RegMemReg => {
-                let r1 = self.take_register()?;
-                let r2 = self.take_mem_register()?;
-                let r3 = self.take_register()?;
-                Ok(ParsedOperands::Reg3(r1, r2, r3))
-            }
-
-            InstructionFormat::RegMemImm => {
-                let r1 = self.take_register()?;
-                let r2 = self.take_mem_register()?;
-                let imm = self.take_immediate()?;
-                Ok(ParsedOperands::Reg2Imm(r1, r2, imm))
-            }
-        }
+    fn reference(map: &mut ReferenceMap, name: &str, span: Span) {
+        map.entry(name.to_string()).or_default().push(span);
     }
 
     pub fn parse(mut self) -> ParserResult {
@@ -525,7 +160,7 @@ impl Parser {
 
             // Skip tokens during error recovery until we hit a sync point
             if self.recovery_mode {
-                if Self::is_sync_token(&token) {
+                if Self::ends_statement(&token) {
                     self.recovery_mode = false;
                 } else {
                     continue;
@@ -536,6 +171,11 @@ impl Parser {
                 Ok(TokenSpan {
                     token: Token::Eof, ..
                 }) => break,
+
+                Ok(TokenSpan {
+                    token: Token::Newline,
+                    ..
+                }) => {}
 
                 Ok(TokenSpan {
                     token: Token::Label(name),
@@ -568,12 +208,10 @@ impl Parser {
                 },
 
                 Ok(TokenSpan {
-                    token: Token::Keyword(Keyword::Operation(op)),
+                    token: Token::Identifier(mnemonic),
                     span,
-                }) => match self.parse_operation(op, &span) {
-                    Ok(spanned_op) => {
-                        items.push(ParsedItem::Operation(spanned_op));
-                    }
+                }) => match self.parse_instruction(mnemonic, &span) {
+                    Ok(instruction) => items.push(ParsedItem::Instruction(instruction)),
                     Err(e) => self.enter_recovery(e, &mut errors),
                 },
 
@@ -617,228 +255,73 @@ impl Parser {
         Ok((name, value, name_span))
     }
 
-    fn parse_operation(
+    /// Parses operands up to the end of the line. Commas between operands are optional.
+    fn parse_instruction(
         &mut self,
-        op: Operation,
-        span: &Span,
-    ) -> Result<SpannedOperation, ParserError> {
-        use InstructionFormat::*;
-        use OperationWithArgs::*;
+        mnemonic: String,
+        start: &Span,
+    ) -> Result<Instruction, ParserError> {
+        let mut operands = Vec::new();
 
-        match op {
-            // No-operand instructions
-            Operation::Nop => self.parse_instruction(NoOperand, span, |_| Nop),
-            Operation::Hlt => self.parse_instruction(NoOperand, span, |_| Hlt),
-            Operation::Ret => self.parse_instruction(NoOperand, span, |_| Ret),
-            Operation::Bkl => self.parse_instruction(NoOperand, span, |_| Bkl),
-            Operation::Bkr => self.parse_instruction(NoOperand, span, |_| Bkr),
-
-            // Single-register instructions
-            Operation::Inv => self.parse_instruction(Reg1, span, |o| o.into_reg1(Inv1)),
-            Operation::Inc => match self.count_operands() {
-                0..=1 => self.parse_instruction(Reg1, span, |o| o.into_reg1(Inc1)),
-                _ => self.parse_instruction(Reg2, span, |o| o.into_reg2(Inc2)),
-            },
-            Operation::Dec => match self.count_operands() {
-                0..=1 => self.parse_instruction(Reg1, span, |o| o.into_reg1(Dec1)),
-                _ => self.parse_instruction(Reg2, span, |o| o.into_reg2(Dec2)),
-            },
-            Operation::Clr => self.parse_instruction(Reg1, span, |o| o.into_reg1(Clr1)),
-
-            // Two-register instructions
-            Operation::Rsh => match self.count_operands() {
-                0..=1 => self.parse_instruction(Reg1, span, |o| o.into_reg1(Rsh1)),
-                _ => self.parse_instruction(Reg2, span, |o| o.into_reg2(Rsh2)),
-            },
-            Operation::Cmp => self.parse_instruction(Reg2, span, |o| o.into_reg2(Cmp2)),
-            Operation::Mov => match self.is_register(1) {
-                true => self.parse_instruction(Reg2, span, |o| o.into_reg2(Mov2)),
-                false => self.parse_instruction(RegImm, span, |o| o.into_reg_imm(MovI2)),
-            },
-            Operation::Lsh => self.parse_instruction(Reg2, span, |o| o.into_reg2(Lsh2)),
-            Operation::Not => self.parse_instruction(Reg2, span, |o| o.into_reg2(Not2)),
-            Operation::Neg => self.parse_instruction(Reg2, span, |o| o.into_reg2(Neg2)),
-            Operation::Or => self.parse_instruction(Reg2, span, |o| o.into_reg2(Or2)),
-            Operation::Cpy => self.parse_instruction(Reg2, span, |o| o.into_reg2(Cpy2)),
-            Operation::Adc => self.parse_instruction(Reg2, span, |o| o.into_reg2(Adc2)),
-            Operation::Mld => self.parse_instruction(RegMem, span, |o| o.into_reg2(Mld2)),
-            Operation::Mst => match self.is_register(self.offset_after_mem(0)) {
-                true => self.parse_instruction(MemReg, span, |o| o.into_reg2(Mst2)),
-                false => self.parse_instruction(MemImm, span, |o| o.into_reg_imm(MstI2)),
-            },
-            Operation::Swp => match self.is_register(self.offset_after_mem(1)) {
-                true => self.parse_instruction(RegMemReg, span, |o| o.into_reg3(Swp3)),
-                false => self.parse_instruction(RegMemImm, span, |o| o.into_reg2_imm(SwpI3)),
-            },
-            Operation::Pld => self.parse_instruction(Reg2, span, |o| o.into_reg2(Pld2)),
-            Operation::Pst => self.parse_instruction(Reg2, span, |o| o.into_reg2(Pst2)),
-
-            // Three-register instructions
-            Operation::Add => match self.count_operands() {
-                0..=2 => self.parse_instruction(Reg2, span, |o| o.into_reg2(Add2)),
-                _ if self.is_register(2) => {
-                    self.parse_instruction(Reg3, span, |o| o.into_reg3(Add3))
+        while !Self::ends_statement(&self.peek(0)) {
+            match self.peek(0) {
+                Ok(TokenSpan {
+                    token: Token::Comma,
+                    ..
+                }) => {
+                    self.advance()?;
                 }
-                _ => self.parse_instruction(Reg2Imm, span, |o| o.into_reg2_imm(AddI3)),
-            },
-            Operation::Sub => match self.count_operands() {
-                0..=2 => self.parse_instruction(Reg2, span, |o| o.into_reg2(Sub2)),
-                _ if self.is_register(2) => {
-                    self.parse_instruction(Reg3, span, |o| o.into_reg3(Sub3))
+                Ok(TokenSpan {
+                    token: Token::LBracket,
+                    span,
+                }) => {
+                    self.advance()?;
+                    let inner = self.parse_operand()?;
+                    self.expect(0, "`]`", |token| match token {
+                        Token::RBracket => Some(()),
+                        _ => None,
+                    })?;
+                    self.advance()?;
+                    operands.push(SpannedOperand {
+                        operand: Operand::Memory(Box::new(inner)),
+                        span: self.make_span(&span),
+                    });
                 }
-                _ => self.parse_instruction(Reg2Imm, span, |o| o.into_reg2_imm(SubI3)),
-            },
-            Operation::Nor => self.parse_instruction(Reg3, span, |o| o.into_reg3(Nor3)),
-            Operation::And => match self.count_operands() {
-                0..=2 => self.parse_instruction(Reg2, span, |o| o.into_reg2(And2)),
-                _ if self.is_register(2) => {
-                    self.parse_instruction(Reg3, span, |o| o.into_reg3(And3))
-                }
-                _ => self.parse_instruction(Reg2Imm, span, |o| o.into_reg2_imm(AndI3)),
-            },
-            Operation::Xor => match self.count_operands() {
-                0..=2 => self.parse_instruction(Reg2, span, |o| o.into_reg2(Xor2)),
-                _ => self.parse_instruction(Reg3, span, |o| o.into_reg3(Xor3)),
-            },
-
-            // Register + immediate instructions
-            Operation::Ldi => self.parse_instruction(RegImm, span, |o| o.into_reg_imm(Ldi2)),
-            Operation::Adi => self.parse_instruction(RegImm, span, |o| o.into_reg_imm(Adi2)),
-            Operation::Cpi => self.parse_instruction(RegImm, span, |o| o.into_reg_imm(Cpi2)),
-            Operation::Ani => self.parse_instruction(RegImm, span, |o| o.into_reg_imm(Ani2)),
-            Operation::Lsi => self.parse_instruction(RegImm, span, |o| o.into_reg_imm(Lsi2)),
-
-            // Address-only instructions
-            Operation::Jmp => match self.is_register(0) {
-                true => self.parse_instruction(Reg1, span, |o| o.into_reg1(JmpR)),
-                false => self.parse_instruction(Addr, span, |o| o.into_addr(Jmp)),
-            },
-            Operation::Jal => match self.is_register(1) {
-                true => self.parse_instruction(Reg2, span, |o| o.into_reg2(Jal2)),
-                false => self.parse_instruction(RegAddr, span, |o| o.into_reg_addr(JalI2)),
-            },
-            Operation::Pc => self.parse_instruction(Reg1, span, |o| o.into_reg1(Pc1)),
-
-            // Predicates
-            Operation::Pic => {
-                self.parse_instruction(NoOperand, span, |_| Pred(PredicateFlag::Carry))
+                _ => operands.push(self.parse_operand()?),
             }
-            Operation::Pnc => {
-                self.parse_instruction(NoOperand, span, |_| Pred(PredicateFlag::NotCarry))
+        }
+
+        Ok(Instruction {
+            mnemonic,
+            operands,
+            span: self.make_span(start),
+        })
+    }
+
+    fn parse_operand(&mut self) -> Result<SpannedOperand, ParserError> {
+        let TokenSpan { token, span } = self.advance()?;
+
+        let operand = match token {
+            Token::Register(register) => Operand::Register(register),
+            Token::Number(n) => Operand::Number(n as i128),
+            Token::Identifier(name) => {
+                Self::reference(&mut self.define_references, &name, span.clone());
+                Operand::Name(name)
             }
-            Operation::Piz => {
-                self.parse_instruction(NoOperand, span, |_| Pred(PredicateFlag::Zero))
+            Token::Label(name) => {
+                Self::reference(&mut self.label_references, &name, span.clone());
+                Operand::Label(name)
             }
-            Operation::Pnz => {
-                self.parse_instruction(NoOperand, span, |_| Pred(PredicateFlag::NotZero))
+            Token::Keyword(Keyword::Condition(condition)) => Operand::Condition(condition),
+            token => {
+                return Err(ParserError::ExpectedButReceived(
+                    span,
+                    "operand".to_string(),
+                    token,
+                ));
             }
-            Operation::Cal => self.parse_instruction(Addr, span, |o| o.into_addr(Cal)),
+        };
 
-            // Condition + address instructions
-            Operation::Brh => self.parse_instruction(CondAddr, span, |o| o.into_cond_addr(Brh)),
-
-            // Skip
-            Operation::Skp => self.parse_instruction(Skip, span, |o| o.into_skip(Skp)),
-
-            // Memory instructions with optional offset
-            Operation::Lod => self.parse_instruction(Reg2Offset, span, |o| o.into_reg2_offset(Lod)),
-            Operation::Str => self.parse_instruction(Reg2Offset, span, |o| o.into_reg2_offset(Str)),
-        }
-    }
-}
-
-/// Intermediate representation of parsed operands
-enum ParsedOperands {
-    None,
-    Reg1(Register),
-    Reg2(Register, Register),
-    Reg3(Register, Register, Register),
-    RegImm(Register, Immediate),
-    Addr(Address),
-    CondAddr(Condition, Address),
-    Reg2Offset(Register, Register, Option<Offset>),
-    Skip(SkipFlag),
-    Reg2Imm(Register, Register, Immediate),
-    RegAddr(Register, Address),
-}
-
-impl ParsedOperands {
-    fn into_reg1(self, f: fn(Register) -> OperationWithArgs) -> OperationWithArgs {
-        match self {
-            ParsedOperands::Reg1(r) => f(r),
-            _ => unreachable!("Expected Reg1 operands"),
-        }
-    }
-
-    fn into_reg2(self, f: fn(Register, Register) -> OperationWithArgs) -> OperationWithArgs {
-        match self {
-            ParsedOperands::Reg2(r1, r2) => f(r1, r2),
-            _ => unreachable!("Expected Reg2 operands"),
-        }
-    }
-
-    fn into_reg3(
-        self,
-        f: fn(Register, Register, Register) -> OperationWithArgs,
-    ) -> OperationWithArgs {
-        match self {
-            ParsedOperands::Reg3(r1, r2, r3) => f(r1, r2, r3),
-            _ => unreachable!("Expected Reg3 operands"),
-        }
-    }
-
-    fn into_reg_imm(self, f: fn(Register, Immediate) -> OperationWithArgs) -> OperationWithArgs {
-        match self {
-            ParsedOperands::RegImm(r, imm) => f(r, imm),
-            _ => unreachable!("Expected RegImm operands"),
-        }
-    }
-
-    fn into_reg2_imm(
-        self,
-        f: fn(Register, Register, Immediate) -> OperationWithArgs,
-    ) -> OperationWithArgs {
-        match self {
-            ParsedOperands::Reg2Imm(r1, r2, imm) => f(r1, r2, imm),
-            _ => unreachable!("Expected Reg2Imm operands"),
-        }
-    }
-
-    fn into_reg_addr(self, f: fn(Register, Address) -> OperationWithArgs) -> OperationWithArgs {
-        match self {
-            ParsedOperands::RegAddr(r, addr) => f(r, addr),
-            _ => unreachable!("Expected RegAddr operands"),
-        }
-    }
-
-    fn into_addr(self, f: fn(Address) -> OperationWithArgs) -> OperationWithArgs {
-        match self {
-            ParsedOperands::Addr(addr) => f(addr),
-            _ => unreachable!("Expected Addr operands"),
-        }
-    }
-
-    fn into_cond_addr(self, f: fn(Condition, Address) -> OperationWithArgs) -> OperationWithArgs {
-        match self {
-            ParsedOperands::CondAddr(cond, addr) => f(cond, addr),
-            _ => unreachable!("Expected CondAddr operands"),
-        }
-    }
-
-    fn into_skip(self, f: fn(SkipFlag) -> OperationWithArgs) -> OperationWithArgs {
-        match self {
-            ParsedOperands::Skip(skip) => f(skip),
-            _ => unreachable!("Expected CondAddr operands"),
-        }
-    }
-
-    fn into_reg2_offset(
-        self,
-        f: fn(Register, Register, Option<Offset>) -> OperationWithArgs,
-    ) -> OperationWithArgs {
-        match self {
-            ParsedOperands::Reg2Offset(r1, r2, offset) => f(r1, r2, offset),
-            _ => unreachable!("Expected Reg2Offset operands"),
-        }
+        Ok(SpannedOperand { operand, span })
     }
 }

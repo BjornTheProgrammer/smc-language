@@ -7,10 +7,11 @@ use crate::{
     lexer::token::{Register, Span},
     parser::{
         DefineMap, ParsedItem,
-        operations::{Address, Immediate, Offset, OperationWithArgs},
+        operations::{Address, Immediate, Instruction, Offset},
     },
 };
 
+pub mod args;
 pub mod batpu2_mattbatwings_none;
 pub mod lyminal_uni_none;
 pub mod tau_analyzers_none;
@@ -124,10 +125,10 @@ impl Resolver<'_> {
     }
 }
 
-/// Lowers each operation on its own, for targets without rules spanning instructions
+/// Lowers each instruction on its own, for targets without rules spanning instructions
 pub fn lower_each(
     items: &[ParsedItem],
-    mut lower_operation: impl FnMut(&OperationWithArgs, &Span) -> Result<Vec<Machine>, AssemblerError>,
+    mut lower_instruction: impl FnMut(&Instruction) -> Result<Vec<Machine>, AssemblerError>,
 ) -> (Vec<Lowered>, Vec<AssemblerError>) {
     let mut lowered = Vec::new();
     let mut errors = Vec::new();
@@ -135,9 +136,9 @@ pub fn lower_each(
     for item in items {
         match item {
             ParsedItem::Label(name, _) => lowered.push(Lowered::Label(name.clone())),
-            ParsedItem::Operation(spanned) => match lower_operation(&spanned.op, &spanned.span) {
+            ParsedItem::Instruction(instruction) => match lower_instruction(instruction) {
                 Ok(machines) => lowered.push(Lowered::Operation {
-                    span: spanned.span.clone(),
+                    span: instruction.span.clone(),
                     machines,
                 }),
                 Err(error) => errors.push(error),

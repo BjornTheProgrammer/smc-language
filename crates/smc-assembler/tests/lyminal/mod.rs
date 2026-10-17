@@ -52,7 +52,7 @@ fn memory() {
 #[test]
 fn control_flow() {
     assert_eq!(
-        assemble("PIC PNC PIZ PNZ"),
+        assemble("PIC\nPNC\nPIZ\nPNZ"),
         [0b10_00_00_00, 0b10_01_01_01, 0b10_10_10_10, 0b10_11_11_11]
     );
     assert_eq!(assemble("JMP X"), [0b10_11_11_00]);
@@ -144,4 +144,16 @@ fn invalid_operands() {
     assert_eq!(error_count("ADD X Y 300"), 1);
     // A predicate only covers a single instruction
     assert_eq!(error_count("PIZ\nMLD X [X]"), 1);
+}
+
+#[test]
+fn syntax() {
+    // Commas between operands are optional
+    assert_eq!(assemble("ADD X, Z, Y"), assemble("ADD X Z Y"));
+    // A label after an instruction on the same line is an operand
+    assert_eq!(assemble(".top JMP .top"), [0b11_000000, 0b10_11_11_00]);
+    // Statements end at line breaks, so a second mnemonic is an extra operand
+    assert_eq!(error_count("PIC PNC"), 1);
+    // Mnemonics from other targets are unknown
+    assert_eq!(error_count("NOP"), 1);
 }

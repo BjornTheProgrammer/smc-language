@@ -3,12 +3,16 @@ use arbitrary_int::u10;
 use crate::{
     assembler::{
         AssemblerError,
-        backends::{Lowered, Machine, Target, lower_each},
+        backends::{
+            Lowered, Machine, Target,
+            args::{Args, MnemonicTable, decode, numbered_registers},
+            lower_each,
+        },
     },
-    lexer::token::{Register, Span},
+    lexer::token::{Condition, Register, Span},
     parser::{
         ParsedItem,
-        operations::{Address, Immediate, OperationWithArgs, SkipFlag},
+        operations::{Address, Immediate, Operand},
     },
 };
 
@@ -26,10 +30,110 @@ impl Target for TauAnalyzersNone {
     }
 
     fn lower(&self, items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
-        lower_each(items, |op, span| {
-            Ok(vec![lower_operation(op.clone(), span)?])
+        lower_each(items, |instruction| {
+            let op = decode(MNEMONICS, numbered_registers, instruction)?;
+            Ok(vec![lower_operation(op, &instruction.span)?])
         })
     }
+}
+
+#[derive(Debug, Clone)]
+enum Op {
+    Add2(Register, Register),
+    Sub2(Register, Register),
+    Xor2(Register, Register),
+    And2(Register, Register),
+    Or2(Register, Register),
+    Cmp2(Register, Register),
+    Cpy2(Register, Register),
+    Adc2(Register, Register),
+    Mld2(Register, Register),
+    Mst2(Register, Register),
+    Pld2(Register, Register),
+    Pst2(Register, Register),
+    Rsh1(Register),
+    Inv1(Register),
+    Inc1(Register),
+    Dec1(Register),
+    Clr1(Register),
+    Ldi2(Register, Immediate),
+    Adi2(Register, Immediate),
+    Cpi2(Register, Immediate),
+    Ani2(Register, Immediate),
+    Jmp(Address),
+    Cal(Address),
+    Bkl,
+    Bkr,
+    Hlt,
+    Ret,
+    Skp(SkipFlag),
+}
+
+#[derive(Debug, Clone)]
+enum SkipFlag {
+    Never,
+    IfZero,
+    IfNotZero,
+    IfNegative,
+    IfNotNegative,
+}
+
+const MNEMONICS: &MnemonicTable<Op> = &[
+    ("add", |a| Ok(Op::Add2(a.register(0)?, a.register(1)?))),
+    ("sub", |a| Ok(Op::Sub2(a.register(0)?, a.register(1)?))),
+    ("xor", |a| Ok(Op::Xor2(a.register(0)?, a.register(1)?))),
+    ("and", |a| Ok(Op::And2(a.register(0)?, a.register(1)?))),
+    ("or", |a| Ok(Op::Or2(a.register(0)?, a.register(1)?))),
+    ("cmp", |a| Ok(Op::Cmp2(a.register(0)?, a.register(1)?))),
+    ("cpy", |a| Ok(Op::Cpy2(a.register(0)?, a.register(1)?))),
+    ("adc", |a| Ok(Op::Adc2(a.register(0)?, a.register(1)?))),
+    ("mld", |a| {
+        Ok(Op::Mld2(a.register(0)?, a.memory_register(1)?))
+    }),
+    ("mst", |a| {
+        Ok(Op::Mst2(a.memory_register(0)?, a.register(1)?))
+    }),
+    ("pld", |a| Ok(Op::Pld2(a.register(0)?, a.register(1)?))),
+    ("pst", |a| Ok(Op::Pst2(a.register(0)?, a.register(1)?))),
+    ("rsh", |a| Ok(Op::Rsh1(a.register(0)?))),
+    ("inv", |a| Ok(Op::Inv1(a.register(0)?))),
+    ("inc", |a| Ok(Op::Inc1(a.register(0)?))),
+    ("dec", |a| Ok(Op::Dec1(a.register(0)?))),
+    ("clr", |a| Ok(Op::Clr1(a.register(0)?))),
+    ("ldi", |a| Ok(Op::Ldi2(a.register(0)?, a.immediate(1)?))),
+    ("adi", |a| Ok(Op::Adi2(a.register(0)?, a.immediate(1)?))),
+    ("cpi", |a| Ok(Op::Cpi2(a.register(0)?, a.immediate(1)?))),
+    ("ani", |a| Ok(Op::Ani2(a.register(0)?, a.immediate(1)?))),
+    ("jmp", |a| Ok(Op::Jmp(a.address(0)?))),
+    ("cal", |a| Ok(Op::Cal(a.address(0)?))),
+    ("bkl", |_| Ok(Op::Bkl)),
+    ("bkr", |_| Ok(Op::Bkr)),
+    ("hlt", |_| Ok(Op::Hlt)),
+    ("ret", |_| Ok(Op::Ret)),
+    ("skp", decode_skip),
+];
+
+fn decode_skip(args: &Args) -> Result<Op, AssemblerError> {
+    if args.len() == 0 {
+        return Ok(Op::Skp(SkipFlag::Never));
+    }
+
+    let operand = args.operand(0)?;
+    let flag = match &operand.operand {
+        Operand::Condition(Condition::Not) => SkipFlag::Never,
+        Operand::Condition(Condition::NotZero) => SkipFlag::IfNotZero,
+        Operand::Condition(Condition::Negative) => SkipFlag::IfNegative,
+        Operand::Condition(Condition::NotNegative) => SkipFlag::IfNotNegative,
+        Operand::Number(0) => SkipFlag::IfZero,
+        other => {
+            return Err(AssemblerError::InvalidOperands(
+                operand.span.clone(),
+                format!("invalid skip condition {other:?}"),
+            ));
+        }
+    };
+
+    Ok(Op::Skp(flag))
 }
 
 fn assemble_2reg(
@@ -123,61 +227,49 @@ fn assemble_skip(flag: SkipFlag) -> Machine {
         SkipFlag::IfNotZero => 0b010,
         SkipFlag::IfNegative => 0b011,
         SkipFlag::IfNotNegative => 0b100,
-        SkipFlag::Always => 0b101,
     };
     Machine::bytes(vec![0b1111_1 << 3 | (flag_bits & 0b111)])
 }
 
-fn lower_operation(operation: OperationWithArgs, span: &Span) -> Result<Machine, AssemblerError> {
-    let operation = match operation {
-        OperationWithArgs::Clr1(r1) => OperationWithArgs::Ani2(r1, Immediate::Value(0)),
-        _ => operation,
-    };
-
+fn lower_operation(operation: Op, span: &Span) -> Result<Machine, AssemblerError> {
     Ok(match operation {
         // 2 operand instructions
-        OperationWithArgs::Add2(r1, r2) => assemble_2reg(span, 0b0000, r1, r2)?,
-        OperationWithArgs::Sub2(r1, r2) => assemble_2reg(span, 0b0001, r1, r2)?,
-        OperationWithArgs::Xor2(r1, r2) => assemble_2reg(span, 0b0010, r1, r2)?,
-        OperationWithArgs::And2(r1, r2) => assemble_2reg(span, 0b0011, r1, r2)?,
-        OperationWithArgs::Or2(r1, r2) => assemble_2reg(span, 0b0100, r1, r2)?,
-        OperationWithArgs::Cmp2(r1, r2) => assemble_2reg(span, 0b0101, r1, r2)?,
-        OperationWithArgs::Cpy2(r1, r2) => assemble_2reg(span, 0b0110, r1, r2)?,
-        OperationWithArgs::Adc2(r1, r2) => assemble_2reg(span, 0b0111, r1, r2)?,
-        OperationWithArgs::Mld2(r1, r2) => assemble_2reg(span, 0b1000, r1, r2)?,
-        OperationWithArgs::Mst2(r1, r2) => assemble_2reg(span, 0b1001, r1, r2)?,
-        OperationWithArgs::Pld2(r1, r2) => assemble_2reg(span, 0b1010, r1, r2)?,
-        OperationWithArgs::Pst2(r1, r2) => assemble_2reg(span, 0b1011, r1, r2)?,
+        Op::Add2(r1, r2) => assemble_2reg(span, 0b0000, r1, r2)?,
+        Op::Sub2(r1, r2) => assemble_2reg(span, 0b0001, r1, r2)?,
+        Op::Xor2(r1, r2) => assemble_2reg(span, 0b0010, r1, r2)?,
+        Op::And2(r1, r2) => assemble_2reg(span, 0b0011, r1, r2)?,
+        Op::Or2(r1, r2) => assemble_2reg(span, 0b0100, r1, r2)?,
+        Op::Cmp2(r1, r2) => assemble_2reg(span, 0b0101, r1, r2)?,
+        Op::Cpy2(r1, r2) => assemble_2reg(span, 0b0110, r1, r2)?,
+        Op::Adc2(r1, r2) => assemble_2reg(span, 0b0111, r1, r2)?,
+        Op::Mld2(r1, r2) => assemble_2reg(span, 0b1000, r1, r2)?,
+        Op::Mst2(r1, r2) => assemble_2reg(span, 0b1001, r1, r2)?,
+        Op::Pld2(r1, r2) => assemble_2reg(span, 0b1010, r1, r2)?,
+        Op::Pst2(r1, r2) => assemble_2reg(span, 0b1011, r1, r2)?,
 
         // 1 operand instructions
-        OperationWithArgs::Rsh1(r1) => assemble_1reg(span, 0b00, r1)?,
-        OperationWithArgs::Inv1(r1) => assemble_1reg(span, 0b01, r1)?,
-        OperationWithArgs::Inc1(r1) => assemble_1reg(span, 0b10, r1)?,
-        OperationWithArgs::Dec1(r1) => assemble_1reg(span, 0b11, r1)?,
+        Op::Rsh1(r1) => assemble_1reg(span, 0b00, r1)?,
+        Op::Inv1(r1) => assemble_1reg(span, 0b01, r1)?,
+        Op::Inc1(r1) => assemble_1reg(span, 0b10, r1)?,
+        Op::Dec1(r1) => assemble_1reg(span, 0b11, r1)?,
 
         // Immediate instructions
-        OperationWithArgs::Ldi2(r1, imm) => assemble_immediate(span, 0b00, r1, imm)?,
-        OperationWithArgs::Adi2(r1, imm) => assemble_immediate(span, 0b01, r1, imm)?,
-        OperationWithArgs::Cpi2(r1, imm) => assemble_immediate(span, 0b10, r1, imm)?,
-        OperationWithArgs::Ani2(r1, imm) => assemble_immediate(span, 0b11, r1, imm)?,
+        Op::Ldi2(r1, imm) => assemble_immediate(span, 0b00, r1, imm)?,
+        Op::Adi2(r1, imm) => assemble_immediate(span, 0b01, r1, imm)?,
+        Op::Cpi2(r1, imm) => assemble_immediate(span, 0b10, r1, imm)?,
+        Op::Ani2(r1, imm) => assemble_immediate(span, 0b11, r1, imm)?,
+        Op::Clr1(r1) => assemble_immediate(span, 0b11, r1, Immediate::Value(0))?,
 
-        OperationWithArgs::Jmp(addr) => assemble_branch(0b00, addr),
-        OperationWithArgs::Cal(addr) => assemble_branch(0b01, addr),
+        Op::Jmp(addr) => assemble_branch(0b00, addr),
+        Op::Cal(addr) => assemble_branch(0b01, addr),
 
         // Implicit instructions (except skip)
-        OperationWithArgs::Bkl => assemble_implicit(0b0000),
-        OperationWithArgs::Bkr => assemble_implicit(0b0001),
-        OperationWithArgs::Hlt => assemble_implicit(0b0010),
-        OperationWithArgs::Ret => assemble_implicit(0b0011),
+        Op::Bkl => assemble_implicit(0b0000),
+        Op::Bkr => assemble_implicit(0b0001),
+        Op::Hlt => assemble_implicit(0b0010),
+        Op::Ret => assemble_implicit(0b0011),
 
         // Skip instructions
-        OperationWithArgs::Skp(flag) => assemble_skip(flag),
-
-        _ => {
-            return Err(AssemblerError::UnsupportedOperation(
-                span.clone(),
-                operation,
-            ));
-        }
+        Op::Skp(flag) => assemble_skip(flag),
     })
 }

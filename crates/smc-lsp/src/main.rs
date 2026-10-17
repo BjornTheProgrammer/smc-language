@@ -406,7 +406,6 @@ fn extract_span_from_error(err: &AssemblerError) -> &Span {
             ParserError::DuplicateLabel(span, _) => span,
             ParserError::ExpectedButReceived(span, _, _) => span,
             ParserError::UnexpectedEof(span) => span,
-            ParserError::InvalidSkip(span, _) => span,
         },
         AssemblerError::UnsupportedOperation(span, _) => span,
         AssemblerError::InvalidRegister(span, _) => span,
