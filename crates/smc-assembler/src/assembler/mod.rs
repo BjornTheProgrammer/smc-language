@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::{
     assembler::backends::{Lowered, Machine, Resolver, Target},
-    lexer::token::{Condition, Span},
+    lexer::token::Span,
     parser::{
         DefineMap, DefineSpanMap, LabelSpanMap, ParserError, ParserResult, ReferenceMap,
         operations::{Address, Immediate, Offset},
@@ -44,8 +44,8 @@ pub enum AssemblerError {
     #[error("AssemblerError: Offset out of range {1}")]
     OffsetOutOfRange(Span, i128),
 
-    #[error("AssemblerError: Invalid Condition for target {1:?}")]
-    InvalidCondition(Span, Condition),
+    #[error("AssemblerError: Invalid condition `{1}` for this target")]
+    InvalidCondition(Span, String),
 
     #[error("AssemblerError: Immediate out of range {1}")]
     ImmediateOutOfRange(Span, i128),

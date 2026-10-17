@@ -1,4 +1,4 @@
-use crate::lexer::token::{Condition, Register, Span};
+use crate::lexer::token::Span;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Immediate {
@@ -19,15 +19,15 @@ pub enum Offset {
     Define(String),
 }
 
-/// An instruction operand, before a target gives it meaning. A `Name` can be a define or
-/// a register name, depending on the target.
+/// An instruction operand, before a target gives it meaning. Depending on the target, a
+/// `Name` can be a register (`r1`), a condition (`eq`) or a define.
 #[derive(Debug, PartialEq, Clone)]
 pub enum Operand {
-    Register(Register),
     Number(i128),
+    Char(char),
     Name(String),
     Label(String),
-    Condition(Condition),
+    Symbol(String),
     /// A bracketed operand, `[r1]`
     Memory(Box<SpannedOperand>),
 }

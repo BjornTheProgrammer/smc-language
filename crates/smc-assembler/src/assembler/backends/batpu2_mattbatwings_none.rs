@@ -4,16 +4,16 @@ use crate::{
     assembler::{
         AssemblerError, LabelMap,
         backends::{
-            Lowered, Machine, Target,
-            args::{MnemonicTable, decode, numbered_registers},
+            Lowered, Machine, Register, Target,
+            args::{MnemonicTable, Syntax, decode, numbered_register},
             lower_each,
         },
         get_address_value, get_immediate_value, get_offset_value,
     },
-    lexer::token::{Condition, Register, Span},
+    lexer::token::Span,
     parser::{
         DefineMap, ParsedItem,
-        operations::{Address, Immediate, Offset},
+        operations::{Address, Immediate, Offset, Operand, SpannedOperand},
     },
 };
 
@@ -42,7 +42,7 @@ impl Target for BatPu2 {
     fn lower(&self, items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
         // Every instruction is one 16 bit word
         lower_each(items, |instruction| {
-            let op = decode(MNEMONICS, numbered_registers, instruction)?;
+            let op = decode(MNEMONICS, &SYNTAX, instruction)?;
             let span = instruction.span.clone();
             Ok(vec![Machine::new(2, move |resolver| {
                 Ok(
@@ -52,6 +52,48 @@ impl Target for BatPu2 {
                 )
             })])
         })
+    }
+}
+
+const SYNTAX: Syntax = Syntax {
+    register: numbered_register,
+    character,
+};
+
+#[derive(Debug, Clone)]
+enum Condition {
+    Equal,
+    NotEqual,
+    GreaterEqual,
+    Less,
+}
+
+fn condition(operand: &SpannedOperand) -> Result<Condition, AssemblerError> {
+    let invalid = |text: String| AssemblerError::InvalidCondition(operand.span.clone(), text);
+    let text = match &operand.operand {
+        Operand::Name(text) | Operand::Symbol(text) => text.to_ascii_lowercase(),
+        other => return Err(invalid(format!("{other:?}"))),
+    };
+
+    match text.as_str() {
+        "eq" | "=" | "z" | "zero" => Ok(Condition::Equal),
+        "ne" | "!=" | "nz" | "notzero" => Ok(Condition::NotEqual),
+        "ge" | ">=" | "c" | "carry" => Ok(Condition::GreaterEqual),
+        "lt" | "<" | "nc" | "notcarry" => Ok(Condition::Less),
+        _ => Err(invalid(text)),
+    }
+}
+
+/// The BatPU-2 character display's encoding. Tau uses it too.
+pub(super) fn character(c: char) -> Option<i128> {
+    match c {
+        ' ' => Some(0),
+        'a'..='z' => Some(c as i128 - 'a' as i128 + 1),
+        'A'..='Z' => Some(c as i128 - 'A' as i128 + 1),
+        '.' => Some(27),
+        '!' => Some(28),
+        '?' => Some(29),
+        _ => None,
     }
 }
 
@@ -107,12 +149,7 @@ const MNEMONICS: &MnemonicTable<Op> = &[
     ("adi", |a| Ok(Op::Adi2(a.register(0)?, a.immediate(1)?))),
     ("jmp", |a| Ok(Op::Jmp(a.address(0)?))),
     ("brh", |a| {
-        let condition = match a.condition(0)? {
-            // Bare `z` is lexed separately so other targets can use it as a register
-            Condition::Zero => Condition::Equal,
-            condition => condition,
-        };
-        Ok(Op::Brh(condition, a.address(1)?))
+        Ok(Op::Brh(condition(a.operand(0)?)?, a.address(1)?))
     }),
     ("cal", |a| Ok(Op::Cal(a.address(0)?))),
     ("ret", |_| Ok(Op::Ret)),
@@ -225,7 +262,6 @@ fn assemble_operation(
                 Condition::NotEqual => 0b01,
                 Condition::GreaterEqual => 0b10,
                 Condition::Less => 0b11,
-                _ => return Err(AssemblerError::InvalidCondition(span, condition)),
             };
 
             Ok(0b1011 << 12

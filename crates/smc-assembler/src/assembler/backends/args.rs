@@ -3,8 +3,8 @@
 use std::cell::Cell;
 
 use crate::{
-    assembler::AssemblerError,
-    lexer::token::{Condition, Register, Span},
+    assembler::{AssemblerError, backends::Register},
+    lexer::token::Span,
     parser::operations::{Address, Immediate, Instruction, Offset, Operand, SpannedOperand},
 };
 
@@ -14,21 +14,35 @@ pub type Decoder<Op> = fn(&Args) -> Result<Op, AssemblerError>;
 /// A target's mnemonics, each with the decoder for its operands
 pub type MnemonicTable<Op> = [(&'static str, Decoder<Op>)];
 
-/// Names a target gives to registers, beyond `r0`, `r1`, ...
-pub type RegisterNames = fn(&Operand) -> Option<Register>;
+/// How a target reads operands whose meaning differs between targets
+pub struct Syntax {
+    /// The register an operand names, if any
+    pub register: fn(&Operand) -> Option<Register>,
+    /// The value of a character literal, if the target can encode that character
+    pub character: fn(char) -> Option<i128>,
+}
 
-/// Only `rN` registers
-pub fn numbered_registers(operand: &Operand) -> Option<Register> {
-    match operand {
-        Operand::Register(register) => Some(*register),
-        _ => None,
+/// Registers written `r0`, `r1`, ...
+pub fn numbered_register(operand: &Operand) -> Option<Register> {
+    let Operand::Name(name) = operand else {
+        return None;
+    };
+    let digits = name.strip_prefix(['r', 'R'])?;
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
     }
+    digits.parse().ok().map(Register)
+}
+
+/// Characters as their ASCII codes
+pub fn ascii(character: char) -> Option<i128> {
+    character.is_ascii().then_some(character as i128)
 }
 
 /// Decodes an instruction with the table entry for its mnemonic, rejecting leftover operands
 pub fn decode<Op>(
     table: &MnemonicTable<Op>,
-    registers: RegisterNames,
+    syntax: &Syntax,
     instruction: &Instruction,
 ) -> Result<Op, AssemblerError> {
     let (_, decoder) = table
@@ -43,7 +57,7 @@ pub fn decode<Op>(
 
     let args = Args {
         instruction,
-        registers,
+        syntax,
         used: Cell::new(0),
     };
     let op = decoder(&args)?;
@@ -62,7 +76,7 @@ pub fn decode<Op>(
 /// reported as unexpected.
 pub struct Args<'a> {
     instruction: &'a Instruction,
-    registers: RegisterNames,
+    syntax: &'a Syntax,
     used: Cell<usize>,
 }
 
@@ -101,12 +115,12 @@ impl Args<'_> {
         self.instruction
             .operands
             .get(index)
-            .is_some_and(|operand| (self.registers)(&operand.operand).is_some())
+            .is_some_and(|operand| (self.syntax.register)(&operand.operand).is_some())
     }
 
     pub fn register(&self, index: usize) -> Result<Register, AssemblerError> {
         let operand = self.get(index, "a register")?;
-        (self.registers)(&operand.operand).ok_or_else(|| self.mismatch(operand, "a register"))
+        (self.syntax.register)(&operand.operand).ok_or_else(|| self.mismatch(operand, "a register"))
     }
 
     /// A register used as an address, `[r1]`. The brackets are optional.
@@ -116,15 +130,24 @@ impl Args<'_> {
             Operand::Memory(inner) => inner,
             _ => operand,
         };
-        (self.registers)(&inner.operand).ok_or_else(|| self.mismatch(inner, "a memory register"))
+        (self.syntax.register)(&inner.operand)
+            .ok_or_else(|| self.mismatch(inner, "a memory register"))
     }
 
     pub fn immediate(&self, index: usize) -> Result<Immediate, AssemblerError> {
         let operand = self.get(index, "an immediate")?;
         match &operand.operand {
             Operand::Number(n) => Ok(Immediate::Value(*n)),
+            Operand::Char(c) => (self.syntax.character)(*c)
+                .map(Immediate::Value)
+                .ok_or_else(|| {
+                    AssemblerError::InvalidOperands(
+                        operand.span.clone(),
+                        format!("character {c:?} can't be encoded on this target"),
+                    )
+                }),
             Operand::Name(name) => Ok(Immediate::Define(name.clone())),
-            _ => Err(self.mismatch(operand, "an immediate (number or define)")),
+            _ => Err(self.mismatch(operand, "an immediate (number, character or define)")),
         }
     }
 
@@ -144,14 +167,6 @@ impl Args<'_> {
             Operand::Number(n) => Ok(Offset::Value(*n)),
             Operand::Name(name) => Ok(Offset::Define(name.clone())),
             _ => Err(self.mismatch(operand, "an offset (number or define)")),
-        }
-    }
-
-    pub fn condition(&self, index: usize) -> Result<Condition, AssemblerError> {
-        let operand = self.get(index, "a condition")?;
-        match &operand.operand {
-            Operand::Condition(condition) => Ok(condition.clone()),
-            _ => Err(self.mismatch(operand, "a condition")),
         }
     }
 

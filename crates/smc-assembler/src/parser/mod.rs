@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use crate::lexer::{
     LexerError,
-    token::{Keyword, Span, Token, TokenSpan},
+    token::{Span, Token, TokenSpan},
 };
 
 pub mod operations;
@@ -107,7 +107,7 @@ impl Parser {
         matches!(
             token,
             Ok(TokenSpan {
-                token: Token::Newline | Token::Keyword(Keyword::Define) | Token::Eof,
+                token: Token::Newline | Token::Define | Token::Eof,
                 ..
             })
         )
@@ -193,7 +193,7 @@ impl Parser {
                 }
 
                 Ok(TokenSpan {
-                    token: Token::Keyword(Keyword::Define),
+                    token: Token::Define,
                     span: _,
                 }) => match self.parse_define() {
                     Ok((name, value, name_span)) => {
@@ -302,8 +302,9 @@ impl Parser {
         let TokenSpan { token, span } = self.advance()?;
 
         let operand = match token {
-            Token::Register(register) => Operand::Register(register),
             Token::Number(n) => Operand::Number(n as i128),
+            Token::Char(c) => Operand::Char(c),
+            Token::Symbol(symbol) => Operand::Symbol(symbol),
             Token::Identifier(name) => {
                 Self::reference(&mut self.define_references, &name, span.clone());
                 Operand::Name(name)
@@ -312,7 +313,6 @@ impl Parser {
                 Self::reference(&mut self.label_references, &name, span.clone());
                 Operand::Label(name)
             }
-            Token::Keyword(Keyword::Condition(condition)) => Operand::Condition(condition),
             token => {
                 return Err(ParserError::ExpectedButReceived(
                     span,

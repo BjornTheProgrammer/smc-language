@@ -4,12 +4,12 @@ use crate::{
     assembler::{
         AssemblerError,
         backends::{
-            Lowered, Machine, Target,
-            args::{Args, MnemonicTable, decode, numbered_registers},
-            lower_each,
+            Lowered, Machine, Register, Target,
+            args::{Args, MnemonicTable, Syntax, decode, numbered_register},
+            batpu2_mattbatwings_none, lower_each,
         },
     },
-    lexer::token::{Condition, Register, Span},
+    lexer::token::Span,
     parser::{
         ParsedItem,
         operations::{Address, Immediate, Operand},
@@ -31,7 +31,7 @@ impl Target for TauAnalyzersNone {
 
     fn lower(&self, items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
         lower_each(items, |instruction| {
-            let op = decode(MNEMONICS, numbered_registers, instruction)?;
+            let op = decode(MNEMONICS, &SYNTAX, instruction)?;
             Ok(vec![lower_operation(op, &instruction.span)?])
         })
     }
@@ -69,12 +69,16 @@ enum Op {
     Skp(SkipFlag),
 }
 
+const SYNTAX: Syntax = Syntax {
+    register: numbered_register,
+    character: batpu2_mattbatwings_none::character,
+};
+
 #[derive(Debug, Clone)]
 enum SkipFlag {
     Never,
     IfZero,
     IfNotZero,
-    IfNegative,
     IfNotNegative,
 }
 
@@ -120,10 +124,9 @@ fn decode_skip(args: &Args) -> Result<Op, AssemblerError> {
 
     let operand = args.operand(0)?;
     let flag = match &operand.operand {
-        Operand::Condition(Condition::Not) => SkipFlag::Never,
-        Operand::Condition(Condition::NotZero) => SkipFlag::IfNotZero,
-        Operand::Condition(Condition::Negative) => SkipFlag::IfNegative,
-        Operand::Condition(Condition::NotNegative) => SkipFlag::IfNotNegative,
+        Operand::Symbol(symbol) if symbol == "!" || symbol == "-" => SkipFlag::Never,
+        Operand::Symbol(symbol) if symbol == "!0" => SkipFlag::IfNotZero,
+        Operand::Symbol(symbol) if symbol == "!-" => SkipFlag::IfNotNegative,
         Operand::Number(0) => SkipFlag::IfZero,
         other => {
             return Err(AssemblerError::InvalidOperands(
@@ -225,7 +228,7 @@ fn assemble_skip(flag: SkipFlag) -> Machine {
         SkipFlag::Never => 0b000,
         SkipFlag::IfZero => 0b001,
         SkipFlag::IfNotZero => 0b010,
-        SkipFlag::IfNegative => 0b011,
+        // 0b011 skips if negative, which has no syntax yet
         SkipFlag::IfNotNegative => 0b100,
     };
     Machine::bytes(vec![0b1111_1 << 3 | (flag_bits & 0b111)])

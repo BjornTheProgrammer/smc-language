@@ -9,11 +9,11 @@ use crate::{
     assembler::{
         AssemblerError,
         backends::{
-            Lowered, Machine, Resolver, Target,
-            args::{Args, MnemonicTable, decode},
+            Lowered, Machine, Register, Resolver, Target,
+            args::{Args, MnemonicTable, Syntax, ascii, decode, numbered_register},
         },
     },
-    lexer::token::{Condition, Register, Span},
+    lexer::token::Span,
     parser::{
         ParsedItem,
         operations::{Address, Immediate, Operand},
@@ -146,16 +146,20 @@ fn register_or_immediate(
     }
 }
 
-/// Registers by name, X, Y, Z and A, as well as `rN`. `x`, `y` and `a` are parsed as names
-/// and `z` as a condition, so they're only registers where a register is expected.
-fn registers(operand: &Operand) -> Option<Register> {
+const SYNTAX: Syntax = Syntax {
+    register,
+    character: ascii,
+};
+
+/// Registers by name, X, Y, Z and A, as well as `rN`. They're only registers where a
+/// register is expected, so they stay usable as define names elsewhere.
+fn register(operand: &Operand) -> Option<Register> {
     match operand {
-        Operand::Register(register) => Some(*register),
         Operand::Name(name) if name.eq_ignore_ascii_case("x") => Some(Register(X)),
         Operand::Name(name) if name.eq_ignore_ascii_case("y") => Some(Register(Y)),
+        Operand::Name(name) if name.eq_ignore_ascii_case("z") => Some(Register(Z)),
         Operand::Name(name) if name.eq_ignore_ascii_case("a") => Some(Register(A)),
-        Operand::Condition(Condition::Zero) => Some(Register(Z)),
-        _ => None,
+        _ => numbered_register(operand),
     }
 }
 
@@ -510,7 +514,7 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
             ParsedItem::Instruction(instruction) => instruction,
         };
         let span = &instruction.span;
-        let decoded = match decode(MNEMONICS, registers, instruction) {
+        let decoded = match decode(MNEMONICS, &SYNTAX, instruction) {
             Ok(op) => op,
             Err(error) => {
                 errors.push(error);

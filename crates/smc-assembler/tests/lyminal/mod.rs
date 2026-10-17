@@ -98,8 +98,8 @@ fn lut_example() {
         PIZ
         JMP .init
 
-        SWP A [Z] 72
-        SWP Z [A] 101
+        SWP A [Z] 'H'
+        SWP Z [A] 'e'
     ";
 
     assert_eq!(
@@ -156,4 +156,11 @@ fn syntax() {
     assert_eq!(error_count("PIC PNC"), 1);
     // Mnemonics from other targets are unknown
     assert_eq!(error_count("NOP"), 1);
+}
+
+#[test]
+fn characters_are_ascii() {
+    assert_eq!(assemble("SWP A [Z] 'H'"), assemble("SWP A [Z] 72"));
+    assert_eq!(assemble("SWP Z [X] ','"), assemble("SWP Z [X] 44"));
+    assert_eq!(assemble("MST [X] ':'"), assemble("MST [X] 58"));
 }

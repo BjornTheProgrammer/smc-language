@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use crate::lexer::token::{Condition, Keyword, Register, Span, Token, TokenSpan};
+use crate::lexer::token::{Span, Token, TokenSpan};
 use anyhow::Result;
 use smc_macros::match_keywords;
 use thiserror::Error;
@@ -24,17 +24,8 @@ pub enum LexerError {
     #[error("Expected character `{1}`")]
     ExpectedCharacter(Span, char),
 
-    #[error("Unknown condition `{1}`")]
-    UnknownCondition(Span, String),
-
     #[error("Invalid offset `{1}`")]
     InvalidOffset(Span, String),
-
-    #[error("Invalid ISA code `{1}`")]
-    InvalidIsaCode(Span, String),
-
-    #[error("Invalid register number `{1}`")]
-    InvalidRegisterNumber(Span, String),
 }
 
 impl<'a> Lexer<'a> {
@@ -136,47 +127,33 @@ impl<'a> Lexer<'a> {
         let start = self.pos;
 
         let keyword: Option<_> = match_keywords!(
+            "define" => Token::Define,
 
-            "eq" => Keyword::Condition(Condition::Equal),
-            "ne" => Keyword::Condition(Condition::NotEqual),
-            "ge" => Keyword::Condition(Condition::GreaterEqual),
-            "lt" => Keyword::Condition(Condition::Less),
-
-            "=" => Keyword::Condition(Condition::Equal),
-            "!=" => Keyword::Condition(Condition::NotEqual),
-            ">=" => Keyword::Condition(Condition::GreaterEqual),
-            "<" => Keyword::Condition(Condition::Less),
-
-            "!" => Keyword::Condition(Condition::Not),
-            "!0" => Keyword::Condition(Condition::NotZero),
-            "!-" => Keyword::Condition(Condition::NotNegative),
-
-            "z" => Keyword::Condition(Condition::Zero),
-            "nz" => Keyword::Condition(Condition::NotEqual),
-            "c" => Keyword::Condition(Condition::GreaterEqual),
-            "nc" => Keyword::Condition(Condition::Less),
-
-            "zero" => Keyword::Condition(Condition::Equal),
-            "notzero" => Keyword::Condition(Condition::NotEqual),
-            "carry" => Keyword::Condition(Condition::GreaterEqual),
-            "notcarry" => Keyword::Condition(Condition::Less),
-
-            "define" => Keyword::Define,
+            "=" => Token::Symbol("=".to_string()),
+            "!=" => Token::Symbol("!=".to_string()),
+            ">=" => Token::Symbol(">=".to_string()),
+            "<" => Token::Symbol("<".to_string()),
+            "!" => Token::Symbol("!".to_string()),
+            "!0" => Token::Symbol("!0".to_string()),
+            "!-" => Token::Symbol("!-".to_string()),
         );
 
         let token = match keyword {
-            Some((size, keyword)) => {
+            Some((size, token)) => {
                 for _ in 0..size {
                     self.advance();
                 }
 
-                TokenSpan::new(Token::Keyword(keyword), Span::new(start, start + size))
+                TokenSpan::new(token, Span::new(start, start + size))
             }
             None => match self.advance() {
                 Some(b'\'' | b'"') => match self.peek(1) {
                     Some(b'\'' | b'"') => {
+                        let character = self
+                            .advance()
+                            .expect("the closing quote was peeked after this character");
                         let token = TokenSpan::new(
-                        Token::Number(char_to_isa_code(self.advance().expect("Should be impossible for a character to not exist after checking for the character after")).ok_or(LexerError::InvalidIsaCode(Span::new(start, self.pos), String::from("Invalid ISA code")))? as f64),
+                            Token::Char(character as char),
                             Span::new(start, self.pos),
                         );
 
@@ -201,10 +178,7 @@ impl<'a> Lexer<'a> {
                 Some(b'-') => {
                     // Leave the whitespace, which may be a line break, for the next token
                     if self.peek(0).is_some_and(|b| b.is_ascii_whitespace()) {
-                        TokenSpan::new(
-                            Token::Keyword(Keyword::Condition(Condition::Not)),
-                            Span::new(start, start),
-                        )
+                        TokenSpan::new(Token::Symbol("-".to_string()), Span::new(start, self.pos))
                     } else {
                         self.pos -= 1;
                         let value: f64 = self.read_number()?;
@@ -220,48 +194,6 @@ impl<'a> Lexer<'a> {
                     token: Token::Eof,
                     span: Span::new(self.pos, self.pos),
                 },
-                Some(b'r' | b'R') if self.peek(0).is_some_and(|b| b.is_ascii_digit()) => {
-                    // Parse register number directly without string allocation
-                    let mut reg_num: u8 = 0;
-                    let mut has_overflow = false;
-
-                    while let Some(b) = self.peek(0) {
-                        if b.is_ascii_digit() {
-                            self.advance();
-                            if let Some(new_val) = reg_num
-                                .checked_mul(10)
-                                .and_then(|v| v.checked_add(b - b'0'))
-                            {
-                                reg_num = new_val;
-                            } else {
-                                has_overflow = true;
-                            }
-                        } else {
-                            break;
-                        }
-                    }
-
-                    let span = Span::new(start, self.pos);
-
-                    if self
-                        .peek(0)
-                        .is_some_and(|b| b.is_ascii_alphabetic() || b == b'_')
-                    {
-                        self.pos = start;
-                        TokenSpan::new(
-                            Token::Identifier(self.read_identifier()),
-                            Span::new(start, self.pos),
-                        )
-                    } else if has_overflow {
-                        let raw: String = self.input[start..self.pos]
-                            .iter()
-                            .map(|&b| b as char)
-                            .collect();
-                        return Err(LexerError::InvalidRegisterNumber(span, raw));
-                    } else {
-                        TokenSpan::new(Token::Register(Register(reg_num)), span)
-                    }
-                }
                 Some(b'a'..=b'z') | Some(b'A'..=b'Z') => {
                     self.pos -= 1;
                     TokenSpan::new(
@@ -405,18 +337,6 @@ impl<'a> Lexer<'a> {
                 Err(_) => Err(LexerError::InvalidNumber(Span::new(start, self.pos), slice)),
             }
         }
-    }
-}
-
-fn char_to_isa_code(c: u8) -> Option<u8> {
-    match c {
-        b' ' => Some(0),
-        b'a'..=b'z' => Some(c - b'a' + 1),
-        b'A'..=b'Z' => Some(c - b'A' + 1),
-        b'.' => Some(27),
-        b'!' => Some(28),
-        b'?' => Some(29),
-        _ => None,
     }
 }
 

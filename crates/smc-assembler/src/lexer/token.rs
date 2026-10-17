@@ -119,43 +119,20 @@ impl Span {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub enum Condition {
-    Equal,
-    NotEqual,
-    GreaterEqual,
-    Less,
-    Not,
-    NotZero,
-    Negative,
-    NotNegative,
-    /// The bare `z` keyword. Means `Equal` as a condition, or register Z on Lyminal.
-    Zero,
-}
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Keyword {
-    Condition(Condition),
-    Define,
-}
-
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub struct Register(pub u8);
-
-impl Register {
-    pub const R0: Register = Register(0);
-}
-
-#[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    Keyword(Keyword),
+    /// The `define` keyword
+    Define,
     Label(String),
     Identifier(String),
     Number(f64),
+    /// A character literal, `'a'`. Targets decide what number it stands for.
+    Char(char),
+    /// Punctuation such as `!0` or `>=`. Targets decide what it means.
+    Symbol(String),
     Comma,
     /// End of a line, which ends a statement
     Newline,
     LBracket,
     RBracket,
     Eof,
-    Register(Register),
 }

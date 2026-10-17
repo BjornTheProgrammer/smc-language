@@ -64,3 +64,27 @@ fn compiles_minesweeper() {
 fn compiles_tetris() {
     test_compilation("tetris");
 }
+
+#[test]
+fn characters_use_the_display_encoding() {
+    use smc_assembler::CompileError;
+
+    // 'A' is 1 on the BatPU-2 character display, not 65
+    assert_eq!(
+        compile("ldi r1 'A'", &BatPu2, false).expect("compilation should succeed"),
+        compile("ldi r1 1", &BatPu2, false).expect("compilation should succeed")
+    );
+    // ',' has no encoding on the display
+    assert!(matches!(
+        compile("ldi r1 ','", &BatPu2, false),
+        Err(CompileError::AssembleError(_))
+    ));
+}
+
+#[test]
+fn condition_words_are_not_reserved() {
+    // `z` is a condition only where BRH expects one
+    let result = compile("define z 5\nldi r1 z\nbrh z 0", &BatPu2, false)
+        .expect("compilation should succeed");
+    assert_eq!(result, [0x81, 0x05, 0xB0, 0x00]);
+}

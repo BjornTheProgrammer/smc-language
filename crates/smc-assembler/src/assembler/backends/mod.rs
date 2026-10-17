@@ -4,7 +4,7 @@ use crate::{
     assembler::{
         AssemblerError, LabelMap, get_address_value, get_immediate_value, get_offset_value,
     },
-    lexer::token::{Register, Span},
+    lexer::token::Span,
     parser::{
         DefineMap, ParsedItem,
         operations::{Address, Immediate, Instruction, Offset},
@@ -168,7 +168,12 @@ pub fn find_by_extension(extension: &str) -> Option<&'static dyn Target> {
     })
 }
 
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub struct Register(pub u8);
+
 impl Register {
+    pub const R0: Register = Register(0);
+
     /// Returns the register number if the target has that many registers
     fn check(&self, register_count: u8, span: &Span) -> Result<u8, AssemblerError> {
         if self.0 < register_count {
