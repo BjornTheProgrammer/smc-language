@@ -25,3 +25,5 @@ SWP A [Z] '!'
 SWP Z [A] ' '
 SWP A [Z] ':'
 SWP Z [A] '3'
+.end
+JMP .end
