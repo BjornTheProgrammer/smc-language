@@ -75,7 +75,7 @@ fn condition(operand: &SpannedOperand) -> Result<Condition, AssemblerError> {
     let invalid = |text: String| AssemblerError::InvalidCondition(operand.span.clone(), text);
     let text = match &operand.operand {
         Operand::Name(text) | Operand::Symbol(text) => text.to_ascii_lowercase(),
-        other => return Err(invalid(format!("{other:?}"))),
+        other => return Err(invalid(other.to_string())),
     };
 
     match text.as_str() {
@@ -308,7 +308,7 @@ fn assemble_operation(
         // Pseudo instructions were rewritten above
         _ => Err(AssemblerError::InvalidOperands(
             span,
-            format!("{operation:?} is not encodable"),
+            format!("Cannot encode `{operation:?}`"),
         )),
     }
 }

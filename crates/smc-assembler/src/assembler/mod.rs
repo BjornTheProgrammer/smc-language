@@ -32,7 +32,7 @@ pub enum AssemblerError {
     #[error("{0}")]
     ParserError(#[from] ParserError),
 
-    #[error("AssemblerError: Unknown instruction `{1}` for this target")]
+    #[error("AssemblerError: Unknown instruction `{1}`")]
     UnsupportedOperation(Span, String),
 
     #[error("AssemblerError: Invalid register `{1}`")]
@@ -44,7 +44,7 @@ pub enum AssemblerError {
     #[error("AssemblerError: Offset out of range {1}")]
     OffsetOutOfRange(Span, i128),
 
-    #[error("AssemblerError: Invalid condition `{1}` for this target")]
+    #[error("AssemblerError: Invalid condition `{1}`")]
     InvalidCondition(Span, String),
 
     #[error("AssemblerError: Immediate out of range {1}")]

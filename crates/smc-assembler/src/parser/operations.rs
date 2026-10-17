@@ -1,3 +1,5 @@
+use std::fmt;
+
 use crate::lexer::token::Span;
 
 #[derive(Debug, PartialEq, Clone)]
@@ -30,6 +32,18 @@ pub enum Operand {
     Symbol(String),
     /// A bracketed operand, `[r1]`
     Memory(Box<SpannedOperand>),
+}
+
+impl fmt::Display for Operand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Operand::Number(n) => write!(f, "{n}"),
+            Operand::Char(c) => write!(f, "{c:?}"),
+            Operand::Name(name) | Operand::Symbol(name) => f.write_str(name),
+            Operand::Label(name) => write!(f, ".{name}"),
+            Operand::Memory(inner) => write!(f, "[{}]", inner.operand),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]

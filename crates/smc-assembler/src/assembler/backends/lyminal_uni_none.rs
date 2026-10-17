@@ -269,7 +269,7 @@ fn expand(
     depth: usize,
 ) -> Result<(), AssemblerError> {
     if depth > MAX_LOWERING_DEPTH {
-        return Err(invalid(span, "internal error: lowering does not terminate"));
+        return Err(invalid(span, "Instruction lowering recursed too deeply"));
     }
 
     // A mode comes from whatever machine instruction was emitted last
@@ -370,17 +370,14 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
             (x, y) => vec![Emit(Base::Op(AD, x, y, A))],
         },
         Mld2(x, y) => match (r(x)?, r(y)?) {
-            (A, A) => return Err(invalid(span, "MLD A [A] is not encodable")),
+            (A, A) => return Err(invalid(span, "Cannot encode `MLD A [A]`")),
             // Load through A, then move it out in A mode
             (rx, ry) if rx == ry => vec![Lower(Mld2(a, y)), Lower(Mov2(x, a))],
             (x, y) => vec![Emit(Base::Op(MEM, x, y, x))],
         },
         Mst2(x, y) => match (r(x)?, r(y)?) {
             (x, y) if x == y => {
-                return Err(invalid(
-                    span,
-                    "MST [r] r stores a register to its own address, which is not encodable",
-                ));
+                return Err(invalid(span, "Cannot store a register to its own address"));
             }
             (x, y) => vec![Emit(Base::Op(MEM, x, x, y))],
         },
@@ -392,13 +389,13 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
             (x, y, _) if x == y => {
                 return Err(invalid(
                     span,
-                    "SWP destination and address must be different registers",
+                    "Destination and address must be different registers",
                 ));
             }
             (x, _, z) if x == z => {
                 return Err(invalid(
                     span,
-                    "SWP destination and stored value must be different registers",
+                    "Destination and value must be different registers",
                 ));
             }
             (x, y, z) => vec![Emit(Base::Op(MEM, x, y, z))],
@@ -407,7 +404,7 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
             (x, y) if x == y => {
                 return Err(invalid(
                     span,
-                    "SWP destination and address must be different registers",
+                    "Destination and address must be different registers",
                 ));
             }
             (x, y) => vec![Emit(Base::Imm(MEM, x, y, Value::Imm(imm)))],
@@ -417,10 +414,7 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
         JmpR(x) => vec![Emit(Base::Op(MEM, A, A, r(x)?))],
         Jal2(x, y) => match (r(x)?, r(y)?) {
             (x, y) if x == y => {
-                return Err(invalid(
-                    span,
-                    "JAL link and target must be different registers",
-                ));
+                return Err(invalid(span, "Link and target must be different registers"));
             }
             (x, y) => vec![Emit(Base::Op(MEM, x, A, y))],
         },
@@ -506,10 +500,7 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
             ParsedItem::Label(name, _) => {
                 if let (Some(op), Some(span)) = (&previous, previous_span) {
                     if writes_to_a(op) {
-                        errors.push(invalid(
-                            span,
-                            "A is written right before a label, so it can't be read on the next line",
-                        ));
+                        errors.push(invalid(span, "A cannot be written before a label"));
                     }
                 }
                 lowered.push(Lowered::Label(name.clone()));
@@ -531,13 +522,13 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
         let reads_a = sources(op).contains(&Register(A));
 
         if uses_a_in_jump(op) {
-            errors.push(invalid(span, "A can't be used in JMP, JAL or PC"));
+            errors.push(invalid(span, "A cannot be used in JMP, JAL, or PC"));
         }
 
         if reads_a && !a_mode {
             errors.push(invalid(
                 span,
-                "A is read here, but not written on the previous line",
+                "A is read without being written on the previous line",
             ));
         }
 
@@ -546,15 +537,15 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
                 // Writing A and ignoring it is fine, unless this line relies on A reading -1
                 if a_mode && !reads_a && bases.first().is_some_and(Base::depends_on_a_mode) {
                     errors.push(invalid(
-                        span,
-                        "the previous line writes A, which changes how this line behaves; read A here or write to another register",
+                        previous_span.unwrap_or(span),
+                        "A is written but not read on the next line",
                     ));
                 }
 
                 if matches!(previous, Some(Op::Pred(_))) && bases.len() != 1 {
                     errors.push(invalid(
                         span,
-                        "a predicated line must assemble to a single instruction",
+                        "Predicated line expands to multiple instructions",
                     ));
                 }
 

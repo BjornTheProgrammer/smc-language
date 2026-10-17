@@ -65,7 +65,7 @@ pub fn decode<Op>(
     if let Some(extra) = instruction.operands.get(args.used.get()) {
         return Err(AssemblerError::InvalidOperands(
             extra.span.clone(),
-            format!("unexpected operand for {}", instruction.mnemonic),
+            format!("Unexpected operand `{}`", extra.operand),
         ));
     }
 
@@ -94,11 +94,7 @@ impl Args<'_> {
         self.instruction.operands.get(index).ok_or_else(|| {
             AssemblerError::InvalidOperands(
                 self.instruction.span.clone(),
-                format!(
-                    "{} expects {expected} as operand {}",
-                    self.instruction.mnemonic,
-                    index + 1
-                ),
+                format!("Expected {expected} as operand {}", index + 1),
             )
         })
     }
@@ -106,7 +102,7 @@ impl Args<'_> {
     fn mismatch(&self, operand: &SpannedOperand, expected: &str) -> AssemblerError {
         AssemblerError::InvalidOperands(
             operand.span.clone(),
-            format!("expected {expected}, but received {:?}", operand.operand),
+            format!("Expected {expected}, but received `{}`", operand.operand),
         )
     }
 
@@ -119,23 +115,23 @@ impl Args<'_> {
     }
 
     pub fn register(&self, index: usize) -> Result<Register, AssemblerError> {
-        let operand = self.get(index, "a register")?;
-        (self.syntax.register)(&operand.operand).ok_or_else(|| self.mismatch(operand, "a register"))
+        let operand = self.get(index, "register")?;
+        (self.syntax.register)(&operand.operand).ok_or_else(|| self.mismatch(operand, "register"))
     }
 
     /// A register used as an address, `[r1]`. The brackets are optional.
     pub fn memory_register(&self, index: usize) -> Result<Register, AssemblerError> {
-        let operand = self.get(index, "a memory register")?;
+        let operand = self.get(index, "memory register")?;
         let inner = match &operand.operand {
             Operand::Memory(inner) => inner,
             _ => operand,
         };
         (self.syntax.register)(&inner.operand)
-            .ok_or_else(|| self.mismatch(inner, "a memory register"))
+            .ok_or_else(|| self.mismatch(inner, "memory register"))
     }
 
     pub fn immediate(&self, index: usize) -> Result<Immediate, AssemblerError> {
-        let operand = self.get(index, "an immediate")?;
+        let operand = self.get(index, "immediate")?;
         match &operand.operand {
             Operand::Number(n) => Ok(Immediate::Value(*n)),
             Operand::Char(c) => (self.syntax.character)(*c)
@@ -143,35 +139,35 @@ impl Args<'_> {
                 .ok_or_else(|| {
                     AssemblerError::InvalidOperands(
                         operand.span.clone(),
-                        format!("character {c:?} can't be encoded on this target"),
+                        format!("Unsupported character {c:?}"),
                     )
                 }),
             Operand::Name(name) => Ok(Immediate::Define(name.clone())),
-            _ => Err(self.mismatch(operand, "an immediate (number, character or define)")),
+            _ => Err(self.mismatch(operand, "immediate (number, character, or define)")),
         }
     }
 
     pub fn address(&self, index: usize) -> Result<Address, AssemblerError> {
-        let operand = self.get(index, "an address")?;
+        let operand = self.get(index, "address")?;
         match &operand.operand {
             Operand::Number(n) => Ok(Address::Value(*n)),
             Operand::Name(name) => Ok(Address::Define(name.clone())),
             Operand::Label(name) => Ok(Address::Label(name.clone())),
-            _ => Err(self.mismatch(operand, "an address (number, label, or define)")),
+            _ => Err(self.mismatch(operand, "address (number, label, or define)")),
         }
     }
 
     pub fn offset(&self, index: usize) -> Result<Offset, AssemblerError> {
-        let operand = self.get(index, "an offset")?;
+        let operand = self.get(index, "offset")?;
         match &operand.operand {
             Operand::Number(n) => Ok(Offset::Value(*n)),
             Operand::Name(name) => Ok(Offset::Define(name.clone())),
-            _ => Err(self.mismatch(operand, "an offset (number or define)")),
+            _ => Err(self.mismatch(operand, "offset (number or define)")),
         }
     }
 
     /// The operand as written, for targets with operand kinds of their own
     pub fn operand(&self, index: usize) -> Result<&SpannedOperand, AssemblerError> {
-        self.get(index, "an operand")
+        self.get(index, "operand")
     }
 }

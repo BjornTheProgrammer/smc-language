@@ -134,7 +134,7 @@ fn decode_skip(args: &Args) -> Result<Op, AssemblerError> {
         other => {
             return Err(AssemblerError::InvalidOperands(
                 operand.span.clone(),
-                format!("invalid skip condition {other:?}"),
+                format!("Invalid skip `{other}`"),
             ));
         }
     };

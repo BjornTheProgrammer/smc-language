@@ -94,11 +94,7 @@ impl Machine {
         if bytes.len() != self.size {
             return Err(AssemblerError::InvalidOperands(
                 resolver.span.clone(),
-                format!(
-                    "internal error: encoded {} bytes, but {} were laid out",
-                    bytes.len(),
-                    self.size
-                ),
+                format!("Encoded {} bytes, expected {}", bytes.len(), self.size),
             ));
         }
         Ok(bytes)
