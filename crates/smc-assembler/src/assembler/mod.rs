@@ -68,6 +68,8 @@ pub struct AssemblerResult {
     pub result: Result<Vec<u8>, Vec<AssemblerError>>,
     /// Every instruction that encoded, in program order
     pub instructions: Vec<AssembledInstruction>,
+    /// Total size of the laid out program in bytes
+    pub size: usize,
     pub bytes_per_address: usize,
     pub defines: DefineMap,
     pub labels: LabelMap,
@@ -116,6 +118,7 @@ impl Assembler {
                 }
             }
         }
+        let size = address;
 
         let mut instructions = Vec::new();
         let mut address = 0;
@@ -160,6 +163,7 @@ impl Assembler {
                 Err(errors)
             },
             instructions,
+            size,
             bytes_per_address: self.target.bytes_per_address(),
             defines: self.parser_results.defines,
             labels,

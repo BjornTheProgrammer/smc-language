@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use smc_assembler::assembler::backends;
 use smc_assembler::assembler::{AssembledInstruction, Assembler, AssemblerError, LabelMap};
@@ -22,6 +23,8 @@ struct Definitions {
     define_references: ReferenceMap,
     label_references: ReferenceMap,
     instructions: Vec<AssembledInstruction>,
+    /// Total program size in bytes
+    size: usize,
     bytes_per_address: usize,
     source_text: String,
 }
@@ -31,11 +34,21 @@ struct Backend {
     client: Client,
     /// Each open document's latest assembly, by URI
     documents: RwLock<HashMap<Url, Definitions>>,
+    /// Whether the client can be asked to request inlay hints again
+    inlay_hint_refresh: AtomicBool,
 }
 
 #[tower_lsp::async_trait]
 impl LanguageServer for Backend {
-    async fn initialize(&self, _: InitializeParams) -> Result<InitializeResult> {
+    async fn initialize(&self, params: InitializeParams) -> Result<InitializeResult> {
+        let refresh = params
+            .capabilities
+            .workspace
+            .and_then(|workspace| workspace.inlay_hint)
+            .and_then(|inlay_hint| inlay_hint.refresh_support)
+            .unwrap_or(false);
+        self.inlay_hint_refresh.store(refresh, Ordering::Relaxed);
+
         Ok(InitializeResult {
             server_info: None,
             capabilities: ServerCapabilities {
@@ -53,6 +66,7 @@ impl LanguageServer for Backend {
                     ..Default::default()
                 }),
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
+                inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
                 ..ServerCapabilities::default()
@@ -290,6 +304,33 @@ impl LanguageServer for Backend {
 
         Ok(Some(CompletionResponse::Array(items)))
     }
+
+    async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
+        let documents = self.documents.read().await;
+        let Some(definitions) = documents.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+
+        // The program's size, after its last instruction
+        let Some(last) = definitions.instructions.last() else {
+            return Ok(None);
+        };
+        let position = offset_to_position(last.span.end(), &definitions.source_text);
+        if position < params.range.start || position > params.range.end {
+            return Ok(None);
+        }
+
+        Ok(Some(vec![InlayHint {
+            position,
+            label: InlayHintLabel::String(size_text(definitions)),
+            kind: None,
+            text_edits: None,
+            tooltip: Some(InlayHintTooltip::String("Program size".to_string())),
+            padding_left: Some(true),
+            padding_right: None,
+            data: None,
+        }]))
+    }
 }
 
 impl Backend {
@@ -319,6 +360,7 @@ impl Backend {
                 define_references: assembler_result.define_references,
                 label_references: assembler_result.label_references,
                 instructions: assembler_result.instructions,
+                size: assembler_result.size,
                 bytes_per_address: assembler_result.bytes_per_address,
                 source_text: text.to_string(),
             },
@@ -341,14 +383,20 @@ impl Backend {
         self.client
             .publish_diagnostics(uri, diagnostics, None)
             .await;
+
+        // The program's size may have changed
+        if self.inlay_hint_refresh.load(Ordering::Relaxed) {
+            let _ = self.client.inlay_hint_refresh().await;
+        }
     }
 }
 
 /// An instruction as written, then each word it assembled to with its address
 fn instruction_hover(instruction: &AssembledInstruction, definitions: &Definitions) -> String {
     let source = &definitions.source_text[instruction.span.start()..instruction.span.end()];
+    let total = format!("Program size: {}", size_text(definitions));
     if instruction.bytes.is_empty() {
-        return format!("**instruction** `{source}`\n\nAssembles to nothing");
+        return format!("**instruction** `{source}`\n\nAssembles to nothing\n\n{total}");
     }
 
     let words: Vec<String> = instruction
@@ -363,9 +411,23 @@ fn instruction_hover(instruction: &AssembledInstruction, definitions: &Definitio
         .collect();
 
     format!(
-        "**instruction** `{source}`\n\n```text\n{}\n```",
+        "**instruction** `{source}`\n\n```text\n{}\n```\n\n{total}",
         words.join("\n")
     )
+}
+
+/// The program's size in bytes, and in words for targets with wider addresses
+fn size_text(definitions: &Definitions) -> String {
+    let plural = |count: usize, unit: &str| match count {
+        1 => format!("1 {unit}"),
+        _ => format!("{count} {unit}s"),
+    };
+
+    let bytes = plural(definitions.size, "byte");
+    match definitions.bytes_per_address {
+        1 => bytes,
+        n => format!("{bytes} ({})", plural(definitions.size / n, "word")),
+    }
 }
 
 /// Extract the span from an assembler error
@@ -486,6 +548,7 @@ async fn main() {
     let (service, socket) = LspService::new(|client| Backend {
         client,
         documents: RwLock::new(HashMap::new()),
+        inlay_hint_refresh: AtomicBool::new(false),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
 }
