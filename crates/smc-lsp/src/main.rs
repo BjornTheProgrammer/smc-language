@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::path::Path;
+
 use smc_assembler::assembler::backends;
 use smc_assembler::assembler::{Assembler, AssemblerError, LabelMap};
 use smc_assembler::lexer::token::Span;
@@ -24,7 +27,8 @@ struct Definitions {
 #[derive(Debug)]
 struct Backend {
     client: Client,
-    definitions: RwLock<Option<Definitions>>,
+    /// Each open document's latest assembly, by URI
+    documents: RwLock<HashMap<Url, Definitions>>,
 }
 
 #[tower_lsp::async_trait]
@@ -49,14 +53,6 @@ impl LanguageServer for Backend {
                 hover_provider: Some(HoverProviderCapability::Simple(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
-                diagnostic_provider: Some(DiagnosticServerCapabilities::Options(
-                    DiagnosticOptions {
-                        identifier: None,
-                        inter_file_dependencies: false,
-                        workspace_diagnostics: false,
-                        work_done_progress_options: Default::default(),
-                    },
-                )),
                 ..ServerCapabilities::default()
             },
         })
@@ -76,19 +72,19 @@ impl LanguageServer for Backend {
     }
 
     async fn did_open(&self, params: DidOpenTextDocumentParams) {
-        self.on_change(TextDocumentChange {
-            uri: params.text_document.uri.to_string(),
-            text: &params.text_document.text,
-        })
-        .await;
+        self.on_change(params.text_document.uri, &params.text_document.text)
+            .await;
     }
 
     async fn did_change(&self, params: DidChangeTextDocumentParams) {
-        self.on_change(TextDocumentChange {
-            text: &params.content_changes[0].text,
-            uri: params.text_document.uri.to_string(),
-        })
-        .await;
+        self.on_change(params.text_document.uri, &params.content_changes[0].text)
+            .await;
+    }
+
+    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+        let uri = params.text_document.uri;
+        self.documents.write().await.remove(&uri);
+        self.client.publish_diagnostics(uri, vec![], None).await;
     }
 
     async fn goto_definition(
@@ -102,16 +98,12 @@ impl LanguageServer for Backend {
             .clone();
         let position = params.text_document_position_params.position;
 
-        let definitions = self.definitions.read().await;
-        let definitions = match definitions.as_ref() {
-            Some(d) => d,
-            None => return Ok(None),
+        let documents = self.documents.read().await;
+        let Some(definitions) = documents.get(&uri) else {
+            return Ok(None);
         };
 
-        let offset = match position_to_offset(position, &definitions.source_text) {
-            Some(o) => o,
-            None => return Ok(None),
-        };
+        let offset = position_to_offset(position, &definitions.source_text);
 
         // Check if cursor is on a define reference -> go to define definition
         for (name, ref_spans) in &definitions.define_references {
@@ -149,16 +141,12 @@ impl LanguageServer for Backend {
         let position = params.text_document_position.position;
         let include_declaration = params.context.include_declaration;
 
-        let definitions = self.definitions.read().await;
-        let definitions = match definitions.as_ref() {
-            Some(d) => d,
-            None => return Ok(None),
+        let documents = self.documents.read().await;
+        let Some(definitions) = documents.get(&uri) else {
+            return Ok(None);
         };
 
-        let offset = match position_to_offset(position, &definitions.source_text) {
-            Some(o) => o,
-            None => return Ok(None),
-        };
+        let offset = position_to_offset(position, &definitions.source_text);
 
         // Find which symbol the cursor is on
         let symbol_name = find_symbol_at_offset(offset, definitions);
@@ -209,18 +197,15 @@ impl LanguageServer for Backend {
     }
 
     async fn hover(&self, params: HoverParams) -> Result<Option<Hover>> {
+        let uri = params.text_document_position_params.text_document.uri;
         let position = params.text_document_position_params.position;
 
-        let definitions = self.definitions.read().await;
-        let definitions = match definitions.as_ref() {
-            Some(d) => d,
-            None => return Ok(None),
+        let documents = self.documents.read().await;
+        let Some(definitions) = documents.get(&uri) else {
+            return Ok(None);
         };
 
-        let offset = match position_to_offset(position, &definitions.source_text) {
-            Some(o) => o,
-            None => return Ok(None),
-        };
+        let offset = position_to_offset(position, &definitions.source_text);
 
         // Find the symbol at this position
         if let Some(name) = find_symbol_at_offset(offset, definitions) {
@@ -256,11 +241,11 @@ impl LanguageServer for Backend {
         Ok(None)
     }
 
-    async fn completion(&self, _: CompletionParams) -> Result<Option<CompletionResponse>> {
-        let definitions = self.definitions.read().await;
-        let definitions = match definitions.as_ref() {
-            Some(d) => d,
-            None => return Ok(Some(CompletionResponse::Array(vec![]))),
+    async fn completion(&self, params: CompletionParams) -> Result<Option<CompletionResponse>> {
+        let documents = self.documents.read().await;
+        let Some(definitions) = documents.get(&params.text_document_position.text_document.uri)
+        else {
+            return Ok(Some(CompletionResponse::Array(vec![])));
         };
 
         let mut items = Vec::new();
@@ -292,87 +277,46 @@ impl LanguageServer for Backend {
 }
 
 impl Backend {
-    async fn on_change(&self, item: TextDocumentChange<'_>) {
-        let backend = (|| {
-            let url = Url::parse(&item.uri).ok()?;
-            let path = url.to_file_path().ok()?;
-            let ext = path.extension()?.to_str()?;
+    async fn on_change(&self, uri: Url, text: &str) {
+        // The path works for any URI scheme, including unsaved documents
+        let backend = Path::new(uri.path())
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .and_then(backends::find_by_extension);
 
-            backends::find_by_extension(ext)
-        })();
-
-        let backend = match backend {
-            Some(backend) => backend,
-            None => return,
+        let Some(backend) = backend else {
+            return;
         };
 
-        let tokens: Vec<_> = Lexer::new(&item.text).into_iter().collect();
+        let tokens: Vec<_> = Lexer::new(text).into_iter().collect();
         let parsed = Parser::new(tokens).parse();
         let assembler_result = Assembler::new(backend, parsed).assemble();
 
-        // Extract the result before moving assembler_result
-        // We need to destructure or take ownership of the result
-        let (
-            result,
-            defines,
-            labels,
-            define_spans,
-            label_spans,
-            define_references,
-            label_references,
-        ) = (
-            assembler_result.result,
-            assembler_result.defines,
-            assembler_result.labels,
-            assembler_result.define_spans,
-            assembler_result.label_spans,
-            assembler_result.define_references,
-            assembler_result.label_references,
+        // Store definitions (even if there are errors, we still want navigation to work)
+        self.documents.write().await.insert(
+            uri.clone(),
+            Definitions {
+                defines: assembler_result.defines,
+                labels: assembler_result.labels,
+                define_spans: assembler_result.define_spans,
+                label_spans: assembler_result.label_spans,
+                define_references: assembler_result.define_references,
+                label_references: assembler_result.label_references,
+                source_text: text.to_string(),
+            },
         );
 
-        // Store definitions (even if there are errors, we still want navigation to work)
-        {
-            let mut definitions = self.definitions.write().await;
-            *definitions = Some(Definitions {
-                defines,
-                labels,
-                define_spans,
-                label_spans,
-                define_references,
-                label_references,
-                source_text: item.text.to_string(),
-            });
-        }
-
-        let uri =
-            Url::parse(&item.uri).unwrap_or_else(|_| Url::from_directory_path(&item.uri).unwrap());
-
-        let errors = match result {
-            Ok(_) => {
-                // Clear diagnostics on success
-                self.client.publish_diagnostics(uri, vec![], None).await;
-                return;
-            }
-            Err(errs) => errs,
-        };
-
-        let diagnostics: Vec<_> = errors
+        let diagnostics: Vec<_> = assembler_result
+            .result
+            .err()
+            .unwrap_or_default()
             .into_iter()
-            .map(|err| {
-                let span = extract_span_from_error(&err);
-                let range = span_to_range(span, item.text);
-
-                Diagnostic {
-                    range,
-                    severity: Some(DiagnosticSeverity::ERROR),
-                    code: None,
-                    code_description: None,
-                    source: Some("smc-assembler".to_string()),
-                    message: err.to_string(),
-                    related_information: None,
-                    tags: None,
-                    data: None,
-                }
+            .map(|err| Diagnostic {
+                range: span_to_range(extract_span_from_error(&err), text),
+                severity: Some(DiagnosticSeverity::ERROR),
+                source: Some("smc-assembler".to_string()),
+                message: err.to_string(),
+                ..Default::default()
             })
             .collect();
 
@@ -380,11 +324,6 @@ impl Backend {
             .publish_diagnostics(uri, diagnostics, None)
             .await;
     }
-}
-
-struct TextDocumentChange<'a> {
-    uri: String,
-    text: &'a str,
 }
 
 /// Extract the span from an assembler error
@@ -421,35 +360,43 @@ fn span_to_range(span: &Span, source: &str) -> Range {
     Range::new(start, end)
 }
 
-/// Convert an LSP Position to a byte offset in the source text
-fn position_to_offset(position: Position, source: &str) -> Option<usize> {
-    let mut offset = 0;
-    for (line_num, line) in source.lines().enumerate() {
-        if line_num == position.line as usize {
-            let char_offset = position.character as usize;
-            return Some(offset + char_offset.min(line.len()));
+/// Convert an LSP Position to a byte offset in the source text. Positions count columns in
+/// UTF-16 units, and a column past the end of a line means the end of that line.
+fn position_to_offset(position: Position, source: &str) -> usize {
+    let mut line_start = 0;
+    for _ in 0..position.line {
+        match source[line_start..].find('\n') {
+            Some(i) => line_start += i + 1,
+            None => return source.len(),
         }
-        offset += line.len() + 1; // +1 for newline
     }
-    Some(source.len())
+
+    let rest = &source[line_start..];
+    let line = &rest[..rest.find('\n').unwrap_or(rest.len())];
+    let line = line.strip_suffix('\r').unwrap_or(line);
+
+    let mut units = 0;
+    for (i, ch) in line.char_indices() {
+        if units >= position.character as usize {
+            return line_start + i;
+        }
+        units += ch.len_utf16();
+    }
+    line_start + line.len()
 }
 
-/// Convert a byte offset to an LSP Position
+/// Convert a byte offset to an LSP Position, counting columns in UTF-16 units
 fn offset_to_position(offset: usize, source: &str) -> Position {
-    let mut line = 0u32;
-    let mut col = 0u32;
-    for (i, ch) in source.char_indices() {
-        if i >= offset {
-            break;
-        }
-        if ch == '\n' {
-            line += 1;
-            col = 0;
-        } else {
-            col += 1;
-        }
+    let mut offset = offset.min(source.len());
+    while !source.is_char_boundary(offset) {
+        offset -= 1;
     }
-    Position::new(line, col)
+
+    let before = &source[..offset];
+    let line = before.matches('\n').count();
+    let line_start = before.rfind('\n').map_or(0, |i| i + 1);
+    let column: usize = before[line_start..].chars().map(char::len_utf16).sum();
+    Position::new(line as u32, column as u32)
 }
 
 /// Find the symbol name at a given byte offset
@@ -496,7 +443,39 @@ async fn main() {
 
     let (service, socket) = LspService::new(|client| Backend {
         client,
-        definitions: RwLock::new(None),
+        documents: RwLock::new(HashMap::new()),
     });
     Server::new(stdin, stdout, socket).serve(service).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn converts_lf_positions() {
+        let source = "ldi r1 1\njmp .loop\n";
+        assert_eq!(position_to_offset(Position::new(1, 4), source), 13);
+        assert_eq!(offset_to_position(13, source), Position::new(1, 4));
+    }
+
+    #[test]
+    fn converts_crlf_positions() {
+        let source = "ldi r1 1\r\njmp .loop\r\nhlt";
+        // `.loop` starts at byte 14, after "ldi r1 1\r\njmp "
+        assert_eq!(position_to_offset(Position::new(1, 4), source), 14);
+        assert_eq!(offset_to_position(14, source), Position::new(1, 4));
+        assert_eq!(position_to_offset(Position::new(2, 0), source), 21);
+        // Columns past the end of a line stop before its \r\n
+        assert_eq!(position_to_offset(Position::new(0, 99), source), 8);
+    }
+
+    #[test]
+    fn counts_columns_in_utf16() {
+        // 'é' is 2 bytes and 1 UTF-16 unit, '😀' is 4 bytes and 2 UTF-16 units
+        let source = "# é😀 .x";
+        let label = source.find(".x").unwrap();
+        assert_eq!(offset_to_position(label, source), Position::new(0, 6));
+        assert_eq!(position_to_offset(Position::new(0, 6), source), label);
+    }
 }
