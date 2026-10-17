@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use crate::{
-    assembler::{Assembler, AssemblerError, backends::Backend},
+    assembler::{Assembler, AssemblerError, backends::Target},
     lexer::{Lexer, LexerError},
     parser::{Parser, ParserError},
     save::{memory::Format, save_file},
@@ -39,7 +39,7 @@ pub enum CompileError {
 pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
     input: P1,
     output: P2,
-    target: Backend,
+    target: &'static dyn Target,
     debug_artifacts: bool,
     format: Option<Format>,
 ) -> Result<(), CompileError> {
@@ -106,7 +106,7 @@ pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
 
 pub fn compile(
     source: &str,
-    target: Backend,
+    target: &'static dyn Target,
     generate_debug_artifacts: bool,
 ) -> Result<Vec<u8>, CompileError> {
     let tokens: Vec<_> = Lexer::new(source).into_iter().collect();

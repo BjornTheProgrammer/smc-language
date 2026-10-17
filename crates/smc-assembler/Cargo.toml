@@ -24,8 +24,6 @@ arbitrary-int = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
-strum = "0.27"
-strum_macros = "0.27"
 
 mc_schem = "1.1"
 

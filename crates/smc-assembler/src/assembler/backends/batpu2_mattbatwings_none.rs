@@ -2,7 +2,7 @@ use arbitrary_int::{i4, u10};
 
 use crate::{
     assembler::{
-        AssemblerError, LabelMap, backends::Backend, get_address_value, get_immediate_value,
+        AssemblerError, LabelMap, backends::Target, get_address_value, get_immediate_value,
         get_offset_value,
     },
     lexer::token::{Condition, Register, Span},
@@ -12,7 +12,46 @@ use crate::{
     },
 };
 
-pub fn insert_before(defines: &mut DefineMap) -> Result<(), AssemblerError> {
+const REGISTER_COUNT: u8 = 16;
+
+pub struct BatPu2;
+
+impl Target for BatPu2 {
+    fn name(&self) -> &'static str {
+        "batpu2-mattbatwings-none"
+    }
+
+    fn extensions(&self) -> &'static [&'static str] {
+        &["smc"]
+    }
+
+    fn insert_before(&self, defines: &mut DefineMap) -> Result<(), AssemblerError> {
+        insert_before(defines)
+    }
+
+    fn instruction_byte_size(
+        &self,
+        op: &OperationWithArgs,
+        _previous: Option<&OperationWithArgs>,
+    ) -> usize {
+        instruction_byte_size(op)
+    }
+
+    fn assemble_operation(
+        &self,
+        defines: &DefineMap,
+        labels: &LabelMap,
+        op: OperationWithArgs,
+        _previous: Option<&OperationWithArgs>,
+        span: Span,
+    ) -> Result<Vec<u8>, AssemblerError> {
+        Ok(assemble_operation(defines, labels, op, span)?
+            .to_be_bytes()
+            .to_vec())
+    }
+}
+
+fn insert_before(defines: &mut DefineMap) -> Result<(), AssemblerError> {
     let ports = [
         "pixel_x",
         "pixel_y",
@@ -38,20 +77,18 @@ pub fn insert_before(defines: &mut DefineMap) -> Result<(), AssemblerError> {
     Ok(())
 }
 
-pub fn instruction_byte_size(op: &OperationWithArgs) -> usize {
+fn instruction_byte_size(op: &OperationWithArgs) -> usize {
     match op {
         _ => 1,
     }
 }
 
-pub fn assemble_operation(
+fn assemble_operation(
     defines: &DefineMap,
     labels: &LabelMap,
     operation: OperationWithArgs,
     span: Span,
 ) -> Result<u16, AssemblerError> {
-    let backend = Backend::BatPU2;
-
     // Instruction lowering
     let operation = match operation {
         OperationWithArgs::Cmp2(r1, r2) => OperationWithArgs::Sub3(r1, r2, Register::R0),
@@ -68,33 +105,33 @@ pub fn assemble_operation(
         OperationWithArgs::Nop => Ok(0b0000 << 12),
         OperationWithArgs::Hlt => Ok(0b0001 << 12),
         OperationWithArgs::Add3(r1, r2, r3) => Ok(0b0010 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(&backend, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(&backend, &span)? & 0xF) as u16)),
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
+            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
         OperationWithArgs::Sub3(r1, r2, r3) => Ok(0b0011 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(&backend, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(&backend, &span)? & 0xF) as u16)),
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
+            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
         OperationWithArgs::Nor3(r1, r2, r3) => Ok(0b0100 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(&backend, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(&backend, &span)? & 0xF) as u16)),
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
+            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
         OperationWithArgs::And3(r1, r2, r3) => Ok(0b0101 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(&backend, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(&backend, &span)? & 0xF) as u16)),
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
+            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
         OperationWithArgs::Xor3(r1, r2, r3) => Ok(0b0110 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(&backend, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(&backend, &span)? & 0xF) as u16)),
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
+            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
         OperationWithArgs::Rsh2(r1, r2) => Ok(0b0111 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-            | ((r2.check(&backend, &span)? & 0xF) as u16)),
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+            | ((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
         OperationWithArgs::Ldi2(r1, immediate) => Ok(0b1000 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
             | (check_immediate_value(get_immediate_value(&span, defines, immediate)?, &span)?)),
         OperationWithArgs::Adi2(r1, immediate) => Ok(0b1001 << 12
-            | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
+            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
             | (check_immediate_value(get_immediate_value(&span, defines, immediate)?, &span)?)),
         OperationWithArgs::Jmp(address) => Ok(0b1010 << 12
             | check_address_value(get_address_value(&span, defines, labels, address)?, &span)?),
@@ -124,8 +161,8 @@ pub fn assemble_operation(
             };
 
             Ok(0b1110 << 12
-                | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-                | (((r2.check(&backend, &span)? & 0xF) as u16) << 4)
+                | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+                | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
                 | offset)
         }
         OperationWithArgs::Str(r1, r2, offset) => {
@@ -137,8 +174,8 @@ pub fn assemble_operation(
             };
 
             Ok(0b1111 << 12
-                | (((r1.check(&backend, &span)? & 0xF) as u16) << 8)
-                | (((r2.check(&backend, &span)? & 0xF) as u16) << 4)
+                | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
+                | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
                 | offset)
         }
         _ => Err(AssemblerError::UnsupportedOperation(span, operation)),

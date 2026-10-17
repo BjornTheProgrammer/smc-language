@@ -7,7 +7,7 @@
 
 use crate::{
     assembler::{
-        AssemblerError, LabelMap, backends::Backend, get_address_value, get_immediate_value,
+        AssemblerError, LabelMap, backends::Target, get_address_value, get_immediate_value,
     },
     lexer::token::{Register, Span},
     parser::{
@@ -15,6 +15,43 @@ use crate::{
         operations::{Address, Immediate, OperationWithArgs, PredicateFlag},
     },
 };
+
+const REGISTER_COUNT: u8 = 4;
+
+pub struct LyminalUniNone;
+
+impl Target for LyminalUniNone {
+    fn name(&self) -> &'static str {
+        "lyminal-uni-none"
+    }
+
+    fn extensions(&self) -> &'static [&'static str] {
+        &["lasm"]
+    }
+
+    fn validate(&self, items: &[ParsedItem]) -> Vec<AssemblerError> {
+        validate(items)
+    }
+
+    fn instruction_byte_size(
+        &self,
+        op: &OperationWithArgs,
+        previous: Option<&OperationWithArgs>,
+    ) -> usize {
+        instruction_byte_size(op, previous)
+    }
+
+    fn assemble_operation(
+        &self,
+        defines: &DefineMap,
+        labels: &LabelMap,
+        op: OperationWithArgs,
+        previous: Option<&OperationWithArgs>,
+        span: Span,
+    ) -> Result<Vec<u8>, AssemblerError> {
+        assemble_operation(defines, labels, op, previous, span)
+    }
+}
 
 // Opcodes
 const AD: u8 = 0b00;
@@ -94,7 +131,7 @@ use Step::{Emit, Lower};
 const MAX_LOWERING_DEPTH: usize = 8;
 
 fn reg(span: &Span, register: Register) -> Result<u8, AssemblerError> {
-    register.check(&Backend::LyminalUniNone, span)
+    register.check(REGISTER_COUNT, span)
 }
 
 fn invalid(span: &Span, message: &str) -> AssemblerError {
@@ -360,7 +397,7 @@ fn uses_a_in_jump(op: &OperationWithArgs) -> bool {
 }
 
 /// Checks the rules around register A and predicates, which span several instructions
-pub fn validate(items: &[ParsedItem]) -> Vec<AssemblerError> {
+fn validate(items: &[ParsedItem]) -> Vec<AssemblerError> {
     let mut errors = Vec::new();
     let mut previous: Option<&OperationWithArgs> = None;
     let mut previous_span: Option<&Span> = None;
@@ -444,7 +481,7 @@ fn instruction(op: u8, x: u8, y: u8, z: u8) -> u8 {
     op << 6 | x << 4 | y << 2 | z
 }
 
-pub fn assemble_operation(
+fn assemble_operation(
     defines: &DefineMap,
     labels: &LabelMap,
     operation: OperationWithArgs,
@@ -476,10 +513,7 @@ pub fn assemble_operation(
     Ok(result)
 }
 
-pub fn instruction_byte_size(
-    op: &OperationWithArgs,
-    previous: Option<&OperationWithArgs>,
-) -> usize {
+fn instruction_byte_size(op: &OperationWithArgs, previous: Option<&OperationWithArgs>) -> usize {
     let a_mode = previous.is_some_and(writes_to_a);
     // Invalid operations still take a byte here; their error is reported when assembling
     lower_fully(op, a_mode, &Span::new(0, 0))

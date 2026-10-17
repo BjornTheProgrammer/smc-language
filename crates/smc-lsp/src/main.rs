@@ -1,4 +1,4 @@
-use smc_assembler::assembler::backends::Backend as SmcBackend;
+use smc_assembler::assembler::backends;
 use smc_assembler::assembler::{Assembler, AssemblerError, LabelMap};
 use smc_assembler::lexer::token::Span;
 use smc_assembler::lexer::{Lexer, LexerError};
@@ -296,17 +296,9 @@ impl Backend {
         let backend = (|| {
             let url = Url::parse(&item.uri).ok()?;
             let path = url.to_file_path().ok()?;
-            let ext = path.extension()?;
+            let ext = path.extension()?.to_str()?;
 
-            if ext.eq_ignore_ascii_case("tasm") {
-                Some(SmcBackend::TauAnalyzersNone)
-            } else if ext.eq_ignore_ascii_case("smc") {
-                Some(SmcBackend::BatPU2)
-            } else if ext.eq_ignore_ascii_case("lasm") {
-                Some(SmcBackend::LyminalUniNone)
-            } else {
-                None
-            }
+            backends::find_by_extension(ext)
         })();
 
         let backend = match backend {

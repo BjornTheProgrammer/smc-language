@@ -2,7 +2,7 @@ use arbitrary_int::u10;
 
 use crate::{
     assembler::{
-        AssemblerError, LabelMap, backends::Backend, get_address_value, get_immediate_value,
+        AssemblerError, LabelMap, backends::Target, get_address_value, get_immediate_value,
     },
     lexer::token::{Register, Span},
     parser::{
@@ -11,7 +11,40 @@ use crate::{
     },
 };
 
-pub fn instruction_byte_size(op: &OperationWithArgs) -> usize {
+const REGISTER_COUNT: u8 = 4;
+
+pub struct TauAnalyzersNone;
+
+impl Target for TauAnalyzersNone {
+    fn name(&self) -> &'static str {
+        "tau-analyzers-none"
+    }
+
+    fn extensions(&self) -> &'static [&'static str] {
+        &["tasm"]
+    }
+
+    fn instruction_byte_size(
+        &self,
+        op: &OperationWithArgs,
+        _previous: Option<&OperationWithArgs>,
+    ) -> usize {
+        instruction_byte_size(op)
+    }
+
+    fn assemble_operation(
+        &self,
+        defines: &DefineMap,
+        labels: &LabelMap,
+        op: OperationWithArgs,
+        _previous: Option<&OperationWithArgs>,
+        span: Span,
+    ) -> Result<Vec<u8>, AssemblerError> {
+        assemble_operation(defines, labels, op, span)
+    }
+}
+
+fn instruction_byte_size(op: &OperationWithArgs) -> usize {
     use OperationWithArgs::*;
     match op {
         Ldi2(..) | Adi2(..) | Cpi2(..) | Ani2(..) | Jmp(..) | Cal(..) => 2,
@@ -26,17 +59,15 @@ fn assemble_2reg(
     register1: Register,
 ) -> Result<u8, AssemblerError> {
     // XXXX + DD + SS
-    let backend = Backend::TauAnalyzersNone;
 
     Ok(opcode << 4
-        | (register.check(&backend, &span)? & 0b11) << 2
-        | (register1.check(&backend, &span)? & 0b11))
+        | (register.check(REGISTER_COUNT, &span)? & 0b11) << 2
+        | (register1.check(REGISTER_COUNT, &span)? & 0b11))
 }
 
 fn assemble_1reg(span: &Span, operation: u8, register: Register) -> Result<u8, AssemblerError> {
-    let backend = Backend::TauAnalyzersNone;
     // Format: 1100 + DD + OO
-    Ok(0b1100 << 4 | (register.check(&backend, span)? & 0b11) << 2 | (operation & 0b11))
+    Ok(0b1100 << 4 | (register.check(REGISTER_COUNT, span)? & 0b11) << 2 | (operation & 0b11))
 }
 
 fn assemble_immediate(
@@ -46,10 +77,9 @@ fn assemble_immediate(
     register: Register,
     immediate: Immediate,
 ) -> Result<[u8; 2], AssemblerError> {
-    let backend = Backend::TauAnalyzersNone;
     // Format: 1101 + DD + OO + IIIIIIII
     let first_byte =
-        0b1101 << 4 | (register.check(&backend, span)? & 0b11) << 2 | (operation & 0b11);
+        0b1101 << 4 | (register.check(REGISTER_COUNT, span)? & 0b11) << 2 | (operation & 0b11);
 
     let immediate = get_immediate_value(span, defines, immediate)?;
     if immediate < -128 || immediate > 255 {
@@ -114,7 +144,7 @@ fn assemble_skip(flag: SkipFlag) -> u8 {
     0b1111_1 << 3 | (flag_bits & 0b111)
 }
 
-pub fn assemble_operation(
+fn assemble_operation(
     defines: &DefineMap,
     labels: &LabelMap,
     operation: OperationWithArgs,

@@ -1,4 +1,6 @@
-use smc_assembler::{assembler::backends::Backend, compile, save::convert::convert_to_tau};
+use smc_assembler::{
+    assembler::backends::TauAnalyzersNone, compile, save::convert::convert_to_tau,
+};
 use std::{fs, path::PathBuf};
 
 pub fn test_compilation(program_name: &str) {
@@ -11,8 +13,7 @@ pub fn test_compilation(program_name: &str) {
     expected_path.push(format!("tests/tau/expected/{}.tau", program_name));
 
     let source = fs::read_to_string(path).expect("Should be able to read the source file");
-    let result =
-        compile(&source, Backend::TauAnalyzersNone, false).expect("compilation should succeed");
+    let result = compile(&source, &TauAnalyzersNone, false).expect("compilation should succeed");
     let mc_output = convert_to_tau(result).expect("conversion to mc should succeed");
 
     assert_eq!(

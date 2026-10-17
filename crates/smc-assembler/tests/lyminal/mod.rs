@@ -1,11 +1,11 @@
-use smc_assembler::{CompileError, assembler::backends::Backend, compile};
+use smc_assembler::{CompileError, assembler::backends::LyminalUniNone, compile};
 
 fn assemble(source: &str) -> Vec<u8> {
-    compile(source, Backend::LyminalUniNone, false).expect("compilation should succeed")
+    compile(source, &LyminalUniNone, false).expect("compilation should succeed")
 }
 
 fn error_count(source: &str) -> usize {
-    match compile(source, Backend::LyminalUniNone, false) {
+    match compile(source, &LyminalUniNone, false) {
         Err(CompileError::AssembleError(errors)) => errors.len(),
         other => panic!("expected assembler errors, got {:?}", other),
     }

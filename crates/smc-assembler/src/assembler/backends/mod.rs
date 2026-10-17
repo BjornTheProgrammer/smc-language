@@ -1,6 +1,4 @@
-use clap::{ValueEnum, builder::PossibleValue};
-use strum::VariantArray;
-use strum_macros::VariantArray;
+use std::fmt;
 
 use crate::{
     assembler::{AssemblerError, LabelMap},
@@ -12,102 +10,76 @@ pub mod batpu2_mattbatwings_none;
 pub mod lyminal_uni_none;
 pub mod tau_analyzers_none;
 
-#[derive(Debug, Clone, PartialEq, VariantArray)]
-pub enum Backend {
-    BatPU2,
-    TauAnalyzersNone,
-    LyminalUniNone,
-}
+pub use batpu2_mattbatwings_none::BatPu2;
+pub use lyminal_uni_none::LyminalUniNone;
+pub use tau_analyzers_none::TauAnalyzersNone;
 
-impl Backend {
-    pub fn insert_before(&self, defines: &mut DefineMap) -> Result<(), AssemblerError> {
-        match self {
-            Backend::BatPU2 => batpu2_mattbatwings_none::insert_before(defines),
-            Backend::TauAnalyzersNone => Ok(()),
-            Backend::LyminalUniNone => Ok(()),
-        }
+/// Every target the assembler supports. The CLI and LSP discover targets from here.
+pub static TARGETS: &[&dyn Target] = &[&BatPu2, &TauAnalyzersNone, &LyminalUniNone];
+
+/// An instruction set the assembler can produce machine code for
+pub trait Target: Sync {
+    /// Name used to select the target on the command line
+    fn name(&self) -> &'static str;
+
+    /// Source file extensions the LSP assembles with this target
+    fn extensions(&self) -> &'static [&'static str];
+
+    /// Adds target provided defines, such as port names
+    fn insert_before(&self, _defines: &mut DefineMap) -> Result<(), AssemblerError> {
+        Ok(())
     }
 
     /// Checks rules that span several instructions, before any are assembled
-    pub fn validate(&self, items: &[ParsedItem]) -> Vec<AssemblerError> {
-        match self {
-            Backend::BatPU2 | Backend::TauAnalyzersNone => Vec::new(),
-            Backend::LyminalUniNone => lyminal_uni_none::validate(items),
-        }
+    fn validate(&self, _items: &[ParsedItem]) -> Vec<AssemblerError> {
+        Vec::new()
     }
 
+    /// Size of `op` in bytes. `previous` is the operation directly before it, or `None`
+    /// if a label separates them.
+    fn instruction_byte_size(
+        &self,
+        op: &OperationWithArgs,
+        previous: Option<&OperationWithArgs>,
+    ) -> usize;
+
     /// `previous` is the operation directly before `op`, or `None` if a label separates them
-    pub fn assemble_operation(
+    fn assemble_operation(
         &self,
         defines: &DefineMap,
         labels: &LabelMap,
         op: OperationWithArgs,
         previous: Option<&OperationWithArgs>,
         span: Span,
-    ) -> Result<Vec<u8>, AssemblerError> {
-        match self {
-            Backend::BatPU2 => Ok(batpu2_mattbatwings_none::assemble_operation(
-                defines, labels, op, span,
-            )?
-            .to_be_bytes()
-            .to_vec()),
-            Backend::TauAnalyzersNone => {
-                tau_analyzers_none::assemble_operation(defines, labels, op, span)
-            }
-            Backend::LyminalUniNone => {
-                lyminal_uni_none::assemble_operation(defines, labels, op, previous, span)
-            }
-        }
-    }
+    ) -> Result<Vec<u8>, AssemblerError>;
+}
 
-    pub fn instruction_byte_size(
-        &self,
-        op: &OperationWithArgs,
-        previous: Option<&OperationWithArgs>,
-    ) -> usize {
-        match self {
-            Backend::BatPU2 => batpu2_mattbatwings_none::instruction_byte_size(op),
-            Backend::TauAnalyzersNone => tau_analyzers_none::instruction_byte_size(op),
-            Backend::LyminalUniNone => lyminal_uni_none::instruction_byte_size(op, previous),
-        }
+impl fmt::Debug for dyn Target {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.name())
     }
 }
 
-impl ValueEnum for Backend {
-    fn value_variants<'a>() -> &'a [Self] {
-        Backend::VARIANTS
-    }
-
-    fn to_possible_value(&self) -> Option<PossibleValue> {
-        Some(PossibleValue::new(self.to_str()))
-    }
+pub fn find_by_name(name: &str) -> Option<&'static dyn Target> {
+    TARGETS.iter().copied().find(|target| target.name() == name)
 }
 
-impl Backend {
-    pub fn to_str(&self) -> &'static str {
-        match self {
-            Backend::BatPU2 => "batpu2-mattbatwings-none",
-            Backend::TauAnalyzersNone => "tau-analyzers-none",
-            Backend::LyminalUniNone => "lyminal-uni-none",
-        }
-    }
+pub fn find_by_extension(extension: &str) -> Option<&'static dyn Target> {
+    TARGETS.iter().copied().find(|target| {
+        target
+            .extensions()
+            .iter()
+            .any(|ext| ext.eq_ignore_ascii_case(extension))
+    })
 }
 
 impl Register {
-    fn check(&self, backend: &Backend, span: &Span) -> Result<u8, AssemblerError> {
-        match backend {
-            Backend::BatPU2 => match self {
-                Register(0..=15) => Ok(self.0),
-                Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
-            },
-            Backend::TauAnalyzersNone => match self {
-                Register(0..=3) => Ok(self.0),
-                Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
-            },
-            Backend::LyminalUniNone => match self {
-                Register(0..=3) => Ok(self.0),
-                Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
-            },
+    /// Returns the register number if the target has that many registers
+    fn check(&self, register_count: u8, span: &Span) -> Result<u8, AssemblerError> {
+        if self.0 < register_count {
+            Ok(self.0)
+        } else {
+            Err(AssemblerError::InvalidRegister(span.clone(), self.0))
         }
     }
 }

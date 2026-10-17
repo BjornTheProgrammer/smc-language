@@ -1,4 +1,4 @@
-use smc_assembler::{assembler::backends::Backend, compile, save::convert::convert_to_mc};
+use smc_assembler::{assembler::backends::BatPu2, compile, save::convert::convert_to_mc};
 use std::{fs, path::PathBuf};
 
 pub fn test_compilation(program_name: &str) {
@@ -11,7 +11,7 @@ pub fn test_compilation(program_name: &str) {
     expected_path.push(format!("tests/batpu2/expected/{}.mc", program_name));
 
     let source = fs::read_to_string(path).expect("Should be able to read the source file");
-    let result = compile(&source, Backend::BatPU2, false).expect("compilation should succeed");
+    let result = compile(&source, &BatPu2, false).expect("compilation should succeed");
     let mc_output = convert_to_mc(result).expect("conversion to mc should succeed");
 
     assert_eq!(

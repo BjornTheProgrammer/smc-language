@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::{
-    assembler::backends::Backend,
+    assembler::backends::Target,
     lexer::token::{Condition, Span},
     parser::{
         DefineMap, DefineSpanMap, LabelSpanMap, ParsedItem, ParserError, ParserResult,
@@ -19,7 +19,7 @@ pub type LabelMap = HashMap<String, usize>;
 #[derive(Debug)]
 pub struct Assembler {
     parser_results: ParserResult,
-    target: Backend,
+    target: &'static dyn Target,
 }
 
 #[derive(Error, Debug)]
@@ -67,7 +67,7 @@ pub struct AssemblerResult {
 }
 
 impl Assembler {
-    pub fn new(target: Backend, parser_results: ParserResult) -> Self {
+    pub fn new(target: &'static dyn Target, parser_results: ParserResult) -> Self {
         Assembler {
             parser_results,
             target,

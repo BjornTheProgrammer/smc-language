@@ -1,6 +1,13 @@
 use anyhow::Result;
-use clap::{Parser as ClapParser, Subcommand};
-use smc_assembler::{assembler::backends::Backend, compile_to_file, save::memory::Format};
+use clap::{
+    Parser as ClapParser, Subcommand,
+    builder::{PossibleValuesParser, TypedValueParser},
+};
+use smc_assembler::{
+    assembler::backends::{self, TARGETS, Target},
+    compile_to_file,
+    save::memory::Format,
+};
 use tracing::instrument;
 
 #[derive(ClapParser)]
@@ -21,8 +28,8 @@ enum Commands {
         output: String,
 
         /// Target backend
-        #[arg(short, long)]
-        target: Backend,
+        #[arg(short, long, value_parser = target_parser())]
+        target: &'static dyn Target,
 
         /// Instruction memory format for schematic file
         #[arg(short, long)]
@@ -32,6 +39,12 @@ enum Commands {
         #[arg(long)]
         debug_artifacts: bool,
     },
+}
+
+fn target_parser() -> impl TypedValueParser<Value = &'static dyn Target> {
+    PossibleValuesParser::new(TARGETS.iter().map(|target| target.name())).map(|name| {
+        backends::find_by_name(&name).expect("possible values are registered target names")
+    })
 }
 
 #[instrument]
@@ -45,7 +58,7 @@ fn main() -> Result<()> {
             target,
             debug_artifacts,
             format,
-        } => compile_to_file(input, output, target.clone(), *debug_artifacts, *format)?,
+        } => compile_to_file(input, output, *target, *debug_artifacts, *format)?,
     }
 
     Ok(())
