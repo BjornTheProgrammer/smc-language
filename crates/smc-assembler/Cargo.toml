@@ -19,7 +19,6 @@ smc-macros = { version = "0.3.0", path = "../smc-macros" }
 anyhow = { workspace = true }
 clap = { workspace = true }
 thiserror = { workspace = true }
-arbitrary-int = { workspace = true }
 
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

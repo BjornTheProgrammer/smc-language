@@ -11,6 +11,7 @@ use crate::{
         backends::{
             Lowered, Machine, Register, Resolver, Target,
             args::{Args, MnemonicTable, Syntax, ascii, decode, numbered_register},
+            fields::Field,
         },
     },
     lexer::token::Span,
@@ -145,6 +146,10 @@ fn register_or_immediate(
         false => Ok(immediate(x, y, args.immediate(2)?)),
     }
 }
+
+/// Fields filled by a `BYT` prefixed immediate
+const IMMEDIATE: Field = Field::AnySign(8);
+const ADDRESS: Field = Field::Unsigned(8);
 
 const SYNTAX: Syntax = Syntax {
     register,
@@ -594,30 +599,15 @@ impl Base {
 }
 
 fn resolve(resolver: &Resolver, value: Value) -> Result<u8, AssemblerError> {
-    let (value, negate) = match value {
-        Value::Imm(imm) => (resolver.immediate(imm)?, false),
-        Value::NegImm(imm) => (resolver.immediate(imm)?, true),
-        Value::Addr(addr) => {
-            let address = resolver.address(addr)?;
-            if !(0..=255).contains(&address) {
-                return Err(AssemblerError::AddressOutOfRange(
-                    resolver.span.clone(),
-                    address,
-                ));
-            }
-            return Ok(address as u8);
+    let span = resolver.span;
+    Ok(match value {
+        Value::Imm(imm) => IMMEDIATE.immediate(resolver.immediate(imm)?, span)? as u8,
+        // Range checked as written, then negated so ADD can be done with SUB
+        Value::NegImm(imm) => {
+            (IMMEDIATE.immediate(resolver.immediate(imm)?, span)? as u8).wrapping_neg()
         }
-    };
-
-    if !(-128..=255).contains(&value) {
-        return Err(AssemblerError::ImmediateOutOfRange(
-            resolver.span.clone(),
-            value,
-        ));
-    }
-
-    let value = if negate { -value } else { value };
-    Ok(value.rem_euclid(256) as u8)
+        Value::Addr(addr) => ADDRESS.address(resolver.address(addr)?, span)? as u8,
+    })
 }
 
 fn instruction(op: u8, x: u8, y: u8, z: u8) -> u8 {

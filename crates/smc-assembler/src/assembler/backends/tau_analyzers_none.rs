@@ -1,12 +1,12 @@
-use arbitrary_int::u10;
-
 use crate::{
     assembler::{
         AssemblerError,
         backends::{
             Lowered, Machine, Register, Target,
             args::{Args, MnemonicTable, Syntax, decode, numbered_register},
-            batpu2_mattbatwings_none, lower_each,
+            batpu2_mattbatwings_none,
+            fields::Field,
+            lower_each,
         },
     },
     lexer::token::Span,
@@ -68,6 +68,9 @@ enum Op {
     Ret,
     Skp(SkipFlag),
 }
+
+const IMMEDIATE: Field = Field::AnySign(8);
+const ADDRESS: Field = Field::Unsigned(10);
 
 const SYNTAX: Syntax = Syntax {
     register: numbered_register,
@@ -175,28 +178,9 @@ fn assemble_immediate(
         0b1101 << 4 | (register.check(REGISTER_COUNT, span)? & 0b11) << 2 | (operation & 0b11);
 
     Ok(Machine::new(2, move |resolver| {
-        let immediate = resolver.immediate(immediate)?;
-        if immediate < -128 || immediate > 255 {
-            return Err(AssemblerError::ImmediateOutOfRange(
-                resolver.span.clone(),
-                immediate,
-            ));
-        }
-
+        let immediate = IMMEDIATE.immediate(resolver.immediate(immediate)?, resolver.span)?;
         Ok(vec![first_byte, immediate as u8])
     }))
-}
-
-fn check_address_value(address: i128, span: &Span) -> Result<u16, AssemblerError> {
-    let val: u16 = address
-        .try_into()
-        .map_err(|_| AssemblerError::AddressOutOfRange(span.clone(), address))?;
-
-    let val = u10::try_new(val)
-        .map_err(|_| AssemblerError::AddressOutOfRange(span.clone(), address))?
-        .value();
-
-    Ok((val as u16) & 0b0011_1111_1111)
 }
 
 fn assemble_branch(operation: u8, address: Address) -> Machine {
@@ -205,8 +189,7 @@ fn assemble_branch(operation: u8, address: Address) -> Machine {
     // OO: operation code
     // IIIIIIII: lower 8 bits of 10-bit immediate
     Machine::new(2, move |resolver| {
-        let address_original = resolver.address(address)?;
-        let address_checked = check_address_value(address_original, resolver.span)?;
+        let address_checked = ADDRESS.address(resolver.address(address)?, resolver.span)?;
 
         let imm_upper = ((address_checked >> 8) & 0b11) as u8; // Upper 2 bits
         let imm_lower = (address_checked & 0xFF) as u8; // Lower 8 bits

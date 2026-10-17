@@ -1,11 +1,10 @@
-use arbitrary_int::{i4, u10};
-
 use crate::{
     assembler::{
         AssemblerError, LabelMap,
         backends::{
             Lowered, Machine, Register, Target,
             args::{MnemonicTable, Syntax, decode, numbered_register},
+            fields::Field,
             lower_each,
         },
         get_address_value, get_immediate_value, get_offset_value,
@@ -54,6 +53,10 @@ impl Target for BatPu2 {
         })
     }
 }
+
+const IMMEDIATE: Field = Field::AnySign(8);
+const ADDRESS: Field = Field::Unsigned(10);
+const OFFSET: Field = Field::Signed(4);
 
 const SYNTAX: Syntax = Syntax {
     register: numbered_register,
@@ -250,12 +253,14 @@ fn assemble_operation(
             | ((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
         Op::Ldi2(r1, immediate) => Ok(0b1000 << 12
             | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (check_immediate_value(get_immediate_value(&span, defines, immediate)?, &span)?)),
+            | (IMMEDIATE.immediate(get_immediate_value(&span, defines, immediate)?, &span)?
+                as u16)),
         Op::Adi2(r1, immediate) => Ok(0b1001 << 12
             | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (check_immediate_value(get_immediate_value(&span, defines, immediate)?, &span)?)),
+            | (IMMEDIATE.immediate(get_immediate_value(&span, defines, immediate)?, &span)?
+                as u16)),
         Op::Jmp(address) => Ok(0b1010 << 12
-            | check_address_value(get_address_value(&span, defines, labels, address)?, &span)?),
+            | ADDRESS.address(get_address_value(&span, defines, labels, address)?, &span)? as u16),
         Op::Brh(condition, address) => {
             let condition = match condition {
                 Condition::Equal => 0b00,
@@ -266,16 +271,18 @@ fn assemble_operation(
 
             Ok(0b1011 << 12
                 | (condition << 10)
-                | check_address_value(get_address_value(&span, defines, labels, address)?, &span)?)
+                | ADDRESS.address(get_address_value(&span, defines, labels, address)?, &span)?
+                    as u16)
         }
         Op::Cal(address) => Ok(0b1100 << 12
-            | (check_address_value(get_address_value(&span, defines, labels, address)?, &span)?
+            | (ADDRESS.address(get_address_value(&span, defines, labels, address)?, &span)?
+                as u16
                 & 0b0000_0011_1111_1111)),
         Op::Ret => Ok(0b1101_0000_0000_0000),
         Op::Lod(r1, r2, offset) => {
             let offset = match offset {
                 Some(offset) => {
-                    check_offset_value(get_offset_value(&span, defines, offset)?, &span)?
+                    OFFSET.offset(get_offset_value(&span, defines, offset)?, &span)? as u16
                 }
                 None => 0,
             };
@@ -288,7 +295,7 @@ fn assemble_operation(
         Op::Str(r1, r2, offset) => {
             let offset = match offset {
                 Some(offset) => {
-                    check_offset_value(get_offset_value(&span, defines, offset)?, &span)?
+                    OFFSET.offset(get_offset_value(&span, defines, offset)?, &span)? as u16
                 }
                 None => 0,
             };
@@ -304,36 +311,4 @@ fn assemble_operation(
             format!("{operation:?} is not encodable"),
         )),
     }
-}
-
-fn check_immediate_value(immediate: i128, span: &Span) -> Result<u16, AssemblerError> {
-    if immediate < -128 || immediate > 255 {
-        return Err(AssemblerError::ImmediateOutOfRange(span.clone(), immediate));
-    }
-
-    Ok((immediate as u8) as u16)
-}
-
-fn check_offset_value(offset: i128, span: &Span) -> Result<u16, AssemblerError> {
-    let val: i8 = offset
-        .try_into()
-        .map_err(|_| AssemblerError::OffsetOutOfRange(span.clone(), offset))?;
-
-    let val = i4::try_new(val)
-        .map_err(|_| AssemblerError::OffsetOutOfRange(span.clone(), offset))?
-        .value();
-
-    Ok((val as u16) & 0xF)
-}
-
-fn check_address_value(address: i128, span: &Span) -> Result<u16, AssemblerError> {
-    let val: u16 = address
-        .try_into()
-        .map_err(|_| AssemblerError::AddressOutOfRange(span.clone(), address))?;
-
-    let val = u10::try_new(val)
-        .map_err(|_| AssemblerError::AddressOutOfRange(span.clone(), address))?
-        .value();
-
-    Ok((val as u16) & 0b0011_1111_1111)
 }

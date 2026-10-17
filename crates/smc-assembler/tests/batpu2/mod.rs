@@ -88,3 +88,18 @@ fn condition_words_are_not_reserved() {
         .expect("compilation should succeed");
     assert_eq!(result, [0x81, 0x05, 0xB0, 0x00]);
 }
+
+#[test]
+fn field_ranges() {
+    let assembles = |source: &str| compile(source, &BatPu2, false).is_ok();
+
+    // 8 bit immediates, signed or unsigned
+    assert!(assembles("ldi r1 -128") && assembles("ldi r1 255"));
+    assert!(!assembles("ldi r1 -129") && !assembles("ldi r1 256"));
+    // 10 bit addresses
+    assert!(assembles("jmp 1023"));
+    assert!(!assembles("jmp 1024") && !assembles("jmp -1"));
+    // Signed 4 bit offsets
+    assert!(assembles("lod r1 r2 -8") && assembles("lod r1 r2 7"));
+    assert!(!assembles("lod r1 r2 -9") && !assembles("lod r1 r2 8"));
+}

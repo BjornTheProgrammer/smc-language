@@ -13,6 +13,7 @@ use crate::{
 
 pub mod args;
 pub mod batpu2_mattbatwings_none;
+pub mod fields;
 pub mod lyminal_uni_none;
 pub mod tau_analyzers_none;
 
