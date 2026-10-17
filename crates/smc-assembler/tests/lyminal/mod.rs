@@ -164,3 +164,16 @@ fn characters_are_ascii() {
     assert_eq!(assemble("SWP Z [X] ','"), assemble("SWP Z [X] 44"));
     assert_eq!(assemble("MST [X] ':'"), assemble("MST [X] 58"));
 }
+
+#[test]
+fn saves_one_byte_per_line() {
+    let mut path = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
+    path.push("lyminal_lines.lym");
+
+    smc_assembler::save::save_file(&path, assemble("SWP A [Z] 'H'"), None)
+        .expect("saving should succeed");
+    assert_eq!(
+        std::fs::read_to_string(&path).expect("file should exist"),
+        "11010010\n10111000\n"
+    );
+}

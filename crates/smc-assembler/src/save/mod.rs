@@ -47,7 +47,8 @@ pub fn save_file<P: AsRef<Path>>(
         .map_err(CompileError::WriteFileError)?;
 
         return Ok(());
-    } else if extension == "tau" {
+    } else if extension == "tau" || extension == "lym" {
+        // Tau and Lyminal both have 8 bit words, one per line
         fs::write(
             output,
             convert_to_tau(data).map_err(CompileError::FormatError)?,
