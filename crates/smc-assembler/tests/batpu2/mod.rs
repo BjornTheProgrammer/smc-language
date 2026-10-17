@@ -103,3 +103,19 @@ fn field_ranges() {
     assert!(assembles("lod r1 r2 -8") && assembles("lod r1 r2 7"));
     assert!(!assembles("lod r1 r2 -9") && !assembles("lod r1 r2 8"));
 }
+
+#[test]
+fn reports_instructions_at_word_addresses() {
+    use smc_assembler::{assembler::Assembler, lexer::Lexer, parser::Parser};
+
+    let parsed = Parser::new(Lexer::new("nop\nhlt").collect()).parse();
+    let result = Assembler::new(&BatPu2, parsed).assemble();
+    let instructions: Vec<_> = result
+        .instructions
+        .iter()
+        .map(|i| (i.address, i.bytes.clone()))
+        .collect();
+
+    assert_eq!(instructions, [(0, vec![0x00, 0x00]), (1, vec![0x10, 0x00])]);
+    assert_eq!(result.bytes_per_address, 2);
+}

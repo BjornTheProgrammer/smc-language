@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 use smc_assembler::assembler::backends;
-use smc_assembler::assembler::{Assembler, AssemblerError, LabelMap};
+use smc_assembler::assembler::{AssembledInstruction, Assembler, AssemblerError, LabelMap};
 use smc_assembler::lexer::token::Span;
 use smc_assembler::lexer::{Lexer, LexerError};
 use smc_assembler::parser::{
@@ -21,6 +21,8 @@ struct Definitions {
     label_spans: LabelSpanMap,
     define_references: ReferenceMap,
     label_references: ReferenceMap,
+    instructions: Vec<AssembledInstruction>,
+    bytes_per_address: usize,
     source_text: String,
 }
 
@@ -238,6 +240,20 @@ impl LanguageServer for Backend {
             }
         }
 
+        // Otherwise show the machine code of the instruction under the cursor
+        let instruction = definitions.instructions.iter().find(|instruction| {
+            offset >= instruction.span.start() && offset <= instruction.span.end()
+        });
+        if let Some(instruction) = instruction {
+            return Ok(Some(Hover {
+                contents: HoverContents::Markup(MarkupContent {
+                    kind: MarkupKind::Markdown,
+                    value: instruction_hover(instruction, definitions),
+                }),
+                range: Some(span_to_range(&instruction.span, &definitions.source_text)),
+            }));
+        }
+
         Ok(None)
     }
 
@@ -302,6 +318,8 @@ impl Backend {
                 label_spans: assembler_result.label_spans,
                 define_references: assembler_result.define_references,
                 label_references: assembler_result.label_references,
+                instructions: assembler_result.instructions,
+                bytes_per_address: assembler_result.bytes_per_address,
                 source_text: text.to_string(),
             },
         );
@@ -324,6 +342,30 @@ impl Backend {
             .publish_diagnostics(uri, diagnostics, None)
             .await;
     }
+}
+
+/// An instruction as written, then each word it assembled to with its address
+fn instruction_hover(instruction: &AssembledInstruction, definitions: &Definitions) -> String {
+    let source = &definitions.source_text[instruction.span.start()..instruction.span.end()];
+    if instruction.bytes.is_empty() {
+        return format!("**instruction** `{source}`\n\nAssembles to nothing");
+    }
+
+    let words: Vec<String> = instruction
+        .bytes
+        .chunks(definitions.bytes_per_address)
+        .enumerate()
+        .map(|(i, word)| {
+            let binary: String = word.iter().map(|byte| format!("{byte:08b}")).collect();
+            let hex: String = word.iter().map(|byte| format!("{byte:02X}")).collect();
+            format!("0x{:02X}  {binary}  {hex}", instruction.address + i)
+        })
+        .collect();
+
+    format!(
+        "**instruction** `{source}`\n\n```text\n{}\n```",
+        words.join("\n")
+    )
 }
 
 /// Extract the span from an assembler error

@@ -205,3 +205,33 @@ fn saves_one_byte_per_line() {
         "11010010\n10111000\n"
     );
 }
+
+#[test]
+fn reports_each_instruction() {
+    use smc_assembler::{assembler::Assembler, lexer::Lexer, parser::Parser};
+
+    let source = "LDI X 15\nMOV X X\nMLD Y [Y]";
+    let parsed = Parser::new(Lexer::new(source).collect()).parse();
+    let result = Assembler::new(&LyminalUniNone, parsed).assemble();
+    let instructions: Vec<_> = result
+        .instructions
+        .iter()
+        .map(|i| {
+            (
+                &source[i.span.start()..i.span.end()],
+                i.address,
+                i.bytes.clone(),
+            )
+        })
+        .collect();
+
+    assert_eq!(
+        instructions,
+        [
+            ("LDI X 15", 0, vec![0b11_000011, 0b00_00_11_11]),
+            ("MOV X X", 2, vec![]),
+            // Loads through A, then moves it out
+            ("MLD Y [Y]", 2, vec![0b10_11_01_11, 0b01_01_01_01]),
+        ]
+    );
+}

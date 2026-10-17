@@ -54,9 +54,21 @@ pub enum AssemblerError {
     InvalidOperands(Span, String),
 }
 
+/// One source instruction after assembly, for tools such as the LSP
+#[derive(Debug, Clone)]
+pub struct AssembledInstruction {
+    pub span: Span,
+    /// Address of its first byte, counted in the target's address units
+    pub address: usize,
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Debug)]
 pub struct AssemblerResult {
     pub result: Result<Vec<u8>, Vec<AssemblerError>>,
+    /// Every instruction that encoded, in program order
+    pub instructions: Vec<AssembledInstruction>,
+    pub bytes_per_address: usize,
     pub defines: DefineMap,
     pub labels: LabelMap,
     pub define_spans: DefineSpanMap,
@@ -105,6 +117,8 @@ impl Assembler {
             }
         }
 
+        let mut instructions = Vec::new();
+        let mut address = 0;
         for item in lowered {
             let Lowered::Operation { span, machines } = item else {
                 continue;
@@ -114,34 +128,45 @@ impl Assembler {
                 labels: &labels,
                 span: &span,
             };
+
+            let start = address;
+            let mut instruction_bytes = Vec::new();
+            let mut encoded = true;
             for machine in machines {
+                address += machine.size();
                 match machine.encode(&resolver) {
-                    Ok(mut machine_bytes) => bytes.append(&mut machine_bytes),
-                    Err(e) => errors.push(e),
+                    Ok(mut machine_bytes) => instruction_bytes.append(&mut machine_bytes),
+                    Err(e) => {
+                        errors.push(e);
+                        encoded = false;
+                    }
                 }
+            }
+
+            bytes.extend_from_slice(&instruction_bytes);
+            if encoded {
+                instructions.push(AssembledInstruction {
+                    span,
+                    address: start / self.target.bytes_per_address(),
+                    bytes: instruction_bytes,
+                });
             }
         }
 
-        if errors.is_empty() {
-            AssemblerResult {
-                result: Ok(bytes),
-                defines: self.parser_results.defines,
-                labels,
-                define_spans: self.parser_results.define_spans,
-                label_spans: self.parser_results.label_spans,
-                define_references: self.parser_results.define_references,
-                label_references: self.parser_results.label_references,
-            }
-        } else {
-            AssemblerResult {
-                result: Err(errors),
-                defines: self.parser_results.defines,
-                labels,
-                define_spans: self.parser_results.define_spans,
-                label_spans: self.parser_results.label_spans,
-                define_references: self.parser_results.define_references,
-                label_references: self.parser_results.label_references,
-            }
+        AssemblerResult {
+            result: if errors.is_empty() {
+                Ok(bytes)
+            } else {
+                Err(errors)
+            },
+            instructions,
+            bytes_per_address: self.target.bytes_per_address(),
+            defines: self.parser_results.defines,
+            labels,
+            define_spans: self.parser_results.define_spans,
+            label_spans: self.parser_results.label_spans,
+            define_references: self.parser_results.define_references,
+            label_references: self.parser_results.label_references,
         }
     }
 }
