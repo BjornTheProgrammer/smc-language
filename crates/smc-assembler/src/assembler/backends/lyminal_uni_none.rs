@@ -235,9 +235,6 @@ enum Step {
 
 use Step::{Emit, Lower};
 
-/// Guards against lowerings that expand into each other forever
-const MAX_LOWERING_DEPTH: usize = 8;
-
 fn reg(span: &Span, register: Register) -> Result<u8, AssemblerError> {
     register.check(REGISTER_COUNT, span)
 }
@@ -257,7 +254,7 @@ fn small_literal(imm: &Immediate, range: std::ops::RangeInclusive<i128>) -> Opti
 /// instruction before it wrote A.
 fn lower_fully(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Base>, AssemblerError> {
     let mut out = Vec::new();
-    expand(op, a_mode, span, &mut out, 0)?;
+    expand(op, a_mode, span, &mut out)?;
     Ok(out)
 }
 
@@ -266,17 +263,12 @@ fn expand(
     initial_a_mode: bool,
     span: &Span,
     out: &mut Vec<Base>,
-    depth: usize,
 ) -> Result<(), AssemblerError> {
-    if depth > MAX_LOWERING_DEPTH {
-        return Err(invalid(span, "Instruction lowering recursed too deeply"));
-    }
-
     // A mode comes from whatever machine instruction was emitted last
     let a_mode = out.last().map_or(initial_a_mode, Base::writes_a);
     for step in lower(op, a_mode, span)? {
         match step {
-            Lower(op) => expand(&op, initial_a_mode, span, out, depth + 1)?,
+            Lower(op) => expand(&op, initial_a_mode, span, out)?,
             Emit(base) => out.push(base),
         }
     }
