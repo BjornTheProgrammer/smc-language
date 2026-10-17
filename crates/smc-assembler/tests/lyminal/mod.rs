@@ -210,7 +210,7 @@ fn saves_one_byte_per_line() {
 fn reports_each_instruction() {
     use smc_assembler::{assembler::Assembler, lexer::Lexer, parser::Parser};
 
-    let source = "LDI X 15\nMOV X X\nMLD Y [Y]";
+    let source = "LDI X 15\nMOV X X\nMLD Y [Y]\nMST [X] 'd'";
     let parsed = Parser::new(Lexer::new(source).collect()).parse();
     let result = Assembler::new(&LyminalUniNone, parsed).assemble();
     let instructions: Vec<_> = result
@@ -232,6 +232,8 @@ fn reports_each_instruction() {
             ("MOV X X", 2, vec![]),
             // Loads through A, then moves it out
             ("MLD Y [Y]", 2, vec![0b10_11_01_11, 0b01_01_01_01]),
+            // The span includes the closing quote
+            ("MST [X] 'd'", 4, vec![0b11_011001, 0b10_00_00_00]),
         ]
     );
 }

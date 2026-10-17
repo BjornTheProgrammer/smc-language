@@ -153,14 +153,9 @@ impl<'a> Lexer<'a> {
                         let character = self
                             .advance()
                             .expect("the closing quote was peeked after this character");
-                        let token = TokenSpan::new(
-                            Token::Char(character as char),
-                            Span::new(start, self.pos),
-                        );
-
                         self.advance();
 
-                        token
+                        TokenSpan::new(Token::Char(character as char), Span::new(start, self.pos))
                     }
                     Some(_) | None => {
                         let original_char = self.peek(0).unwrap();
