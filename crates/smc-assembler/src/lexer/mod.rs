@@ -161,6 +161,14 @@ impl<'a> Lexer<'a> {
             "Bkr" => Keyword::Operation(Operation::Bkr),
             "Skp" => Keyword::Operation(Operation::Skp),
             "Clr" => Keyword::Operation(Operation::Clr),
+            "Lsi" => Keyword::Operation(Operation::Lsi),
+            "Swp" => Keyword::Operation(Operation::Swp),
+            "Jal" => Keyword::Operation(Operation::Jal),
+            "Pc" => Keyword::Operation(Operation::Pc),
+            "Pic" => Keyword::Operation(Operation::Pic),
+            "Pnc" => Keyword::Operation(Operation::Pnc),
+            "Piz" => Keyword::Operation(Operation::Piz),
+            "Pnz" => Keyword::Operation(Operation::Pnz),
 
             "eq" => Keyword::Condition(Condition::Equal),
             "ne" => Keyword::Condition(Condition::NotEqual),
@@ -176,7 +184,7 @@ impl<'a> Lexer<'a> {
             "!0" => Keyword::Condition(Condition::NotZero),
             "!-" => Keyword::Condition(Condition::NotNegative),
 
-            "z" => Keyword::Condition(Condition::Equal),
+            "z" => Keyword::Condition(Condition::Zero),
             "nz" => Keyword::Condition(Condition::NotEqual),
             "c" => Keyword::Condition(Condition::GreaterEqual),
             "nc" => Keyword::Condition(Condition::Less),
@@ -294,6 +302,8 @@ impl<'a> Lexer<'a> {
                     )
                 }
                 Some(b',') => TokenSpan::new(Token::Comma, Span::new(start, self.pos)),
+                Some(b'[') => TokenSpan::new(Token::LBracket, Span::new(start, self.pos)),
+                Some(b']') => TokenSpan::new(Token::RBracket, Span::new(start, self.pos)),
                 Some(c) => {
                     return Err(LexerError::UnexpectedCharacter(
                         Span::new(start, self.pos),

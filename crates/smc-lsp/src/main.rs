@@ -302,6 +302,8 @@ impl Backend {
                 Some(SmcBackend::TauAnalyzersNone)
             } else if ext.eq_ignore_ascii_case("smc") {
                 Some(SmcBackend::BatPU2)
+            } else if ext.eq_ignore_ascii_case("lasm") {
+                Some(SmcBackend::LyminalUniNone)
             } else {
                 None
             }
@@ -420,6 +422,7 @@ fn extract_span_from_error(err: &AssemblerError) -> &Span {
         AssemblerError::OffsetOutOfRange(span, _) => span,
         AssemblerError::InvalidCondition(span, _) => span,
         AssemblerError::ImmediateOutOfRange(span, _) => span,
+        AssemblerError::InvalidOperands(span, _) => span,
     }
 }
 

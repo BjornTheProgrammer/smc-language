@@ -5,7 +5,7 @@ use strum_macros::VariantArray;
 use crate::{
     assembler::{AssemblerError, LabelMap},
     lexer::token::{Register, Span},
-    parser::{DefineMap, operations::OperationWithArgs},
+    parser::{DefineMap, ParsedItem, operations::OperationWithArgs},
 };
 
 pub mod batpu2_mattbatwings_none;
@@ -28,11 +28,21 @@ impl Backend {
         }
     }
 
+    /// Checks rules that span several instructions, before any are assembled
+    pub fn validate(&self, items: &[ParsedItem]) -> Vec<AssemblerError> {
+        match self {
+            Backend::BatPU2 | Backend::TauAnalyzersNone => Vec::new(),
+            Backend::LyminalUniNone => lyminal_uni_none::validate(items),
+        }
+    }
+
+    /// `previous` is the operation directly before `op`, or `None` if a label separates them
     pub fn assemble_operation(
         &self,
         defines: &DefineMap,
         labels: &LabelMap,
         op: OperationWithArgs,
+        previous: Option<&OperationWithArgs>,
         span: Span,
     ) -> Result<Vec<u8>, AssemblerError> {
         match self {
@@ -45,16 +55,20 @@ impl Backend {
                 tau_analyzers_none::assemble_operation(defines, labels, op, span)
             }
             Backend::LyminalUniNone => {
-                lyminal_uni_none::assemble_operation(defines, labels, op, span)
+                lyminal_uni_none::assemble_operation(defines, labels, op, previous, span)
             }
         }
     }
 
-    pub fn instruction_byte_size(&self, op: &OperationWithArgs) -> usize {
+    pub fn instruction_byte_size(
+        &self,
+        op: &OperationWithArgs,
+        previous: Option<&OperationWithArgs>,
+    ) -> usize {
         match self {
             Backend::BatPU2 => batpu2_mattbatwings_none::instruction_byte_size(op),
             Backend::TauAnalyzersNone => tau_analyzers_none::instruction_byte_size(op),
-            Backend::LyminalUniNone => lyminal_uni_none::instruction_byte_size(op),
+            Backend::LyminalUniNone => lyminal_uni_none::instruction_byte_size(op, previous),
         }
     }
 }

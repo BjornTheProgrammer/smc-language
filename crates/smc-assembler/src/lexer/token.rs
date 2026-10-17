@@ -128,6 +128,8 @@ pub enum Condition {
     NotZero,
     Negative,
     NotNegative,
+    /// The bare `z` keyword. Means `Equal` as a condition, or register Z on Lyminal.
+    Zero,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -169,6 +171,14 @@ pub enum Operation {
     Bkr,
     Skp,
     Clr,
+    Lsi,
+    Swp,
+    Jal,
+    Pc,
+    Pic,
+    Pnc,
+    Piz,
+    Pnz,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -192,6 +202,8 @@ pub enum Token {
     Identifier(String),
     Number(f64),
     Comma,
+    LBracket,
+    RBracket,
     Eof,
     Register(Register),
 }

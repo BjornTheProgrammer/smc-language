@@ -50,6 +50,9 @@ pub enum AssemblerError {
 
     #[error("AssemblerError: Immediate out of range {1}")]
     ImmediateOutOfRange(Span, i128),
+
+    #[error("AssemblerError: {1}")]
+    InvalidOperands(Span, String),
 }
 
 #[derive(Debug)]
@@ -86,27 +89,38 @@ impl Assembler {
             errors.push(e);
         }
 
+        errors.extend(self.target.validate(&items));
+
         let mut labels: LabelMap = HashMap::new();
         let mut instruction_count = 0;
         let mut operations = Vec::new();
+        // The operation directly before each one, reset by labels since a jump can land there
+        let mut previous: Option<OperationWithArgs> = None;
         for item in items {
             match item {
                 ParsedItem::Label(name, _) => {
                     labels.insert(name, instruction_count);
+                    previous = None;
                 }
                 ParsedItem::Operation(spanned_op) => {
-                    let byte_size = self.target.instruction_byte_size(&spanned_op.op);
+                    let byte_size = self
+                        .target
+                        .instruction_byte_size(&spanned_op.op, previous.as_ref());
                     instruction_count += byte_size;
-                    operations.push(spanned_op);
+                    let next_previous = Some(spanned_op.op.clone());
+                    operations.push((spanned_op, std::mem::replace(&mut previous, next_previous)));
                 }
             }
         }
 
-        for SpannedOperation { op, span } in operations {
-            match self
-                .target
-                .assemble_operation(&self.parser_results.defines, &labels, op, span)
-            {
+        for (SpannedOperation { op, span }, previous) in operations {
+            match self.target.assemble_operation(
+                &self.parser_results.defines,
+                &labels,
+                op,
+                previous.as_ref(),
+                span,
+            ) {
                 Ok(mut word) => bytes.append(&mut word),
                 Err(e) => errors.push(e),
             }

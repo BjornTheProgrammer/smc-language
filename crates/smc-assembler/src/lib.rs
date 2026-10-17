@@ -94,6 +94,7 @@ pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
                     AssemblerError::OffsetOutOfRange(span, _) => span,
                     AssemblerError::InvalidCondition(span, _) => span,
                     AssemblerError::ImmediateOutOfRange(span, _) => span,
+                    AssemblerError::InvalidOperands(span, _) => span,
                 };
 
                 eprintln!("{}", span.format_error(&input, &source, &err.to_string()));
