@@ -7,11 +7,12 @@
 
 use crate::{
     assembler::{
-        AssemblerError, LabelMap, backends::Target, get_address_value, get_immediate_value,
+        AssemblerError,
+        backends::{Lowered, Machine, Resolver, Target},
     },
     lexer::token::{Register, Span},
     parser::{
-        DefineMap, ParsedItem,
+        ParsedItem,
         operations::{Address, Immediate, OperationWithArgs, PredicateFlag},
     },
 };
@@ -29,27 +30,8 @@ impl Target for LyminalUniNone {
         &["lasm"]
     }
 
-    fn validate(&self, items: &[ParsedItem]) -> Vec<AssemblerError> {
-        validate(items)
-    }
-
-    fn instruction_byte_size(
-        &self,
-        op: &OperationWithArgs,
-        previous: Option<&OperationWithArgs>,
-    ) -> usize {
-        instruction_byte_size(op, previous)
-    }
-
-    fn assemble_operation(
-        &self,
-        defines: &DefineMap,
-        labels: &LabelMap,
-        op: OperationWithArgs,
-        previous: Option<&OperationWithArgs>,
-        span: Span,
-    ) -> Result<Vec<u8>, AssemblerError> {
-        assemble_operation(defines, labels, op, previous, span)
+    fn lower(&self, items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
+        lower_program(items)
     }
 }
 
@@ -86,13 +68,6 @@ enum Base {
 }
 
 impl Base {
-    fn byte_size(&self) -> usize {
-        match self {
-            Base::Op(..) | Base::Lsi(..) => 1,
-            Base::Imm(..) => 2,
-        }
-    }
-
     /// Whether this puts the next instruction in A mode
     fn writes_a(&self) -> bool {
         match *self {
@@ -396,20 +371,25 @@ fn uses_a_in_jump(op: &OperationWithArgs) -> bool {
     }
 }
 
-/// Checks the rules around register A and predicates, which span several instructions
-fn validate(items: &[ParsedItem]) -> Vec<AssemblerError> {
+/// Lowers the program, checking the rules around register A and predicates as it goes
+fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
+    let mut lowered = Vec::new();
     let mut errors = Vec::new();
     let mut previous: Option<&OperationWithArgs> = None;
     let mut previous_span: Option<&Span> = None;
 
     for item in items {
         let spanned = match item {
-            ParsedItem::Label(_, _) => {
+            ParsedItem::Label(name, _) => {
                 if let (Some(op), Some(span)) = (previous, previous_span) {
                     if writes_to_a(op) {
-                        errors.push(invalid(span, "A is written right before a label, so it can't be read on the next line"));
+                        errors.push(invalid(
+                            span,
+                            "A is written right before a label, so it can't be read on the next line",
+                        ));
                     }
                 }
+                lowered.push(Lowered::Label(name.clone()));
                 previous = None;
                 continue;
             }
@@ -430,47 +410,84 @@ fn validate(items: &[ParsedItem]) -> Vec<AssemblerError> {
             ));
         }
 
-        if let Ok(bases) = lower_fully(op, a_mode, span) {
-            // Writing A and ignoring it is fine, unless this line relies on A reading -1
-            if a_mode && !reads_a && bases.first().is_some_and(Base::depends_on_a_mode) {
-                errors.push(invalid(span, "the previous line writes A, which changes how this line behaves; read A here or write to another register"));
-            }
+        match lower_fully(op, a_mode, span) {
+            Ok(bases) => {
+                // Writing A and ignoring it is fine, unless this line relies on A reading -1
+                if a_mode && !reads_a && bases.first().is_some_and(Base::depends_on_a_mode) {
+                    errors.push(invalid(
+                        span,
+                        "the previous line writes A, which changes how this line behaves; read A here or write to another register",
+                    ));
+                }
 
-            if matches!(previous, Some(OperationWithArgs::Pred(_))) && bases.len() != 1 {
-                errors.push(invalid(
-                    span,
-                    "a predicated line must assemble to a single instruction",
-                ));
+                if matches!(previous, Some(OperationWithArgs::Pred(_))) && bases.len() != 1 {
+                    errors.push(invalid(
+                        span,
+                        "a predicated line must assemble to a single instruction",
+                    ));
+                }
+
+                lowered.push(Lowered::Operation {
+                    span: span.clone(),
+                    machines: bases.into_iter().map(Base::into_machine).collect(),
+                });
             }
+            Err(error) => errors.push(error),
         }
 
         previous = Some(op);
         previous_span = Some(span);
     }
 
-    errors
+    (lowered, errors)
 }
 
-fn resolve(
-    span: &Span,
-    defines: &DefineMap,
-    labels: &LabelMap,
-    value: Value,
-) -> Result<u8, AssemblerError> {
+impl Base {
+    fn into_machine(self) -> Machine {
+        match self {
+            Base::Op(op, x, y, z) => Machine::bytes(vec![instruction(op, x, y, z)]),
+            Base::Imm(op, x, y, value) => Machine::new(2, move |resolver| {
+                let imm = resolve(resolver, value)?;
+                // BYT IIIIII holds the upper 6 bits, the next instruction's last operand the lower 2
+                Ok(vec![BYT << 6 | imm >> 2, instruction(op, x, y, imm & 0b11)])
+            }),
+            Base::Lsi(x, imm) => Machine::new(1, move |resolver| {
+                match resolver.immediate(imm)? {
+                    // -1 + -1
+                    -2 => Ok(vec![instruction(AD, x, A, A)]),
+                    // Orthogonality patch: IMM - 1
+                    v @ -1..=2 => Ok(vec![instruction(SUB, x, (v + 1) as u8, (v + 1) as u8)]),
+                    v => Err(AssemblerError::ImmediateOutOfRange(
+                        resolver.span.clone(),
+                        v,
+                    )),
+                }
+            }),
+        }
+    }
+}
+
+fn resolve(resolver: &Resolver, value: Value) -> Result<u8, AssemblerError> {
     let (value, negate) = match value {
-        Value::Imm(imm) => (get_immediate_value(span, defines, imm)?, false),
-        Value::NegImm(imm) => (get_immediate_value(span, defines, imm)?, true),
+        Value::Imm(imm) => (resolver.immediate(imm)?, false),
+        Value::NegImm(imm) => (resolver.immediate(imm)?, true),
         Value::Addr(addr) => {
-            let address = get_address_value(span, defines, labels, addr)?;
+            let address = resolver.address(addr)?;
             if !(0..=255).contains(&address) {
-                return Err(AssemblerError::AddressOutOfRange(span.clone(), address));
+                return Err(AssemblerError::AddressOutOfRange(
+                    resolver.span.clone(),
+                    address,
+                ));
             }
             return Ok(address as u8);
         }
     };
 
     if !(-128..=255).contains(&value) {
-        return Err(AssemblerError::ImmediateOutOfRange(span.clone(), value));
+        return Err(AssemblerError::ImmediateOutOfRange(
+            resolver.span.clone(),
+            value,
+        ));
     }
 
     let value = if negate { -value } else { value };
@@ -479,44 +496,4 @@ fn resolve(
 
 fn instruction(op: u8, x: u8, y: u8, z: u8) -> u8 {
     op << 6 | x << 4 | y << 2 | z
-}
-
-fn assemble_operation(
-    defines: &DefineMap,
-    labels: &LabelMap,
-    operation: OperationWithArgs,
-    previous: Option<&OperationWithArgs>,
-    span: Span,
-) -> Result<Vec<u8>, AssemblerError> {
-    let a_mode = previous.is_some_and(writes_to_a);
-    let mut result = Vec::new();
-
-    for base in lower_fully(&operation, a_mode, &span)? {
-        match base {
-            Base::Op(op, x, y, z) => result.push(instruction(op, x, y, z)),
-            Base::Imm(op, x, y, value) => {
-                let imm = resolve(&span, defines, labels, value)?;
-                // BYT IIIIII holds the upper 6 bits, the next instruction's last operand the lower 2
-                result.push(BYT << 6 | imm >> 2);
-                result.push(instruction(op, x, y, imm & 0b11));
-            }
-            Base::Lsi(x, imm) => match get_immediate_value(&span, defines, imm)? {
-                // -1 + -1
-                -2 => result.push(instruction(AD, x, A, A)),
-                // Orthogonality patch: IMM - 1
-                v @ -1..=2 => result.push(instruction(SUB, x, (v + 1) as u8, (v + 1) as u8)),
-                v => return Err(AssemblerError::ImmediateOutOfRange(span, v)),
-            },
-        }
-    }
-
-    Ok(result)
-}
-
-fn instruction_byte_size(op: &OperationWithArgs, previous: Option<&OperationWithArgs>) -> usize {
-    let a_mode = previous.is_some_and(writes_to_a);
-    // Invalid operations still take a byte here; their error is reported when assembling
-    lower_fully(op, a_mode, &Span::new(0, 0))
-        .map(|bases| bases.iter().map(Base::byte_size).sum())
-        .unwrap_or(1)
 }

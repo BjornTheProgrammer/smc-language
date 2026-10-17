@@ -2,11 +2,12 @@ use arbitrary_int::u10;
 
 use crate::{
     assembler::{
-        AssemblerError, LabelMap, backends::Target, get_address_value, get_immediate_value,
+        AssemblerError,
+        backends::{Lowered, Machine, Target, lower_each},
     },
     lexer::token::{Register, Span},
     parser::{
-        DefineMap,
+        ParsedItem,
         operations::{Address, Immediate, OperationWithArgs, SkipFlag},
     },
 };
@@ -24,31 +25,10 @@ impl Target for TauAnalyzersNone {
         &["tasm"]
     }
 
-    fn instruction_byte_size(
-        &self,
-        op: &OperationWithArgs,
-        _previous: Option<&OperationWithArgs>,
-    ) -> usize {
-        instruction_byte_size(op)
-    }
-
-    fn assemble_operation(
-        &self,
-        defines: &DefineMap,
-        labels: &LabelMap,
-        op: OperationWithArgs,
-        _previous: Option<&OperationWithArgs>,
-        span: Span,
-    ) -> Result<Vec<u8>, AssemblerError> {
-        assemble_operation(defines, labels, op, span)
-    }
-}
-
-fn instruction_byte_size(op: &OperationWithArgs) -> usize {
-    use OperationWithArgs::*;
-    match op {
-        Ldi2(..) | Adi2(..) | Cpi2(..) | Ani2(..) | Jmp(..) | Cal(..) => 2,
-        _ => 1,
+    fn lower(&self, items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
+        lower_each(items, |op, span| {
+            Ok(vec![lower_operation(op.clone(), span)?])
+        })
     }
 }
 
@@ -57,38 +37,47 @@ fn assemble_2reg(
     opcode: u8,
     register: Register,
     register1: Register,
-) -> Result<u8, AssemblerError> {
+) -> Result<Machine, AssemblerError> {
     // XXXX + DD + SS
-
-    Ok(opcode << 4
-        | (register.check(REGISTER_COUNT, &span)? & 0b11) << 2
-        | (register1.check(REGISTER_COUNT, &span)? & 0b11))
+    Ok(Machine::bytes(vec![
+        opcode << 4
+            | (register.check(REGISTER_COUNT, span)? & 0b11) << 2
+            | (register1.check(REGISTER_COUNT, span)? & 0b11),
+    ]))
 }
 
-fn assemble_1reg(span: &Span, operation: u8, register: Register) -> Result<u8, AssemblerError> {
+fn assemble_1reg(
+    span: &Span,
+    operation: u8,
+    register: Register,
+) -> Result<Machine, AssemblerError> {
     // Format: 1100 + DD + OO
-    Ok(0b1100 << 4 | (register.check(REGISTER_COUNT, span)? & 0b11) << 2 | (operation & 0b11))
+    Ok(Machine::bytes(vec![
+        0b1100 << 4 | (register.check(REGISTER_COUNT, span)? & 0b11) << 2 | (operation & 0b11),
+    ]))
 }
 
 fn assemble_immediate(
     span: &Span,
-    defines: &DefineMap,
     operation: u8,
     register: Register,
     immediate: Immediate,
-) -> Result<[u8; 2], AssemblerError> {
+) -> Result<Machine, AssemblerError> {
     // Format: 1101 + DD + OO + IIIIIIII
     let first_byte =
         0b1101 << 4 | (register.check(REGISTER_COUNT, span)? & 0b11) << 2 | (operation & 0b11);
 
-    let immediate = get_immediate_value(span, defines, immediate)?;
-    if immediate < -128 || immediate > 255 {
-        return Err(AssemblerError::ImmediateOutOfRange(span.clone(), immediate));
-    }
+    Ok(Machine::new(2, move |resolver| {
+        let immediate = resolver.immediate(immediate)?;
+        if immediate < -128 || immediate > 255 {
+            return Err(AssemblerError::ImmediateOutOfRange(
+                resolver.span.clone(),
+                immediate,
+            ));
+        }
 
-    let immediate = immediate as u8;
-
-    Ok([first_byte, immediate])
+        Ok(vec![first_byte, immediate as u8])
+    }))
 }
 
 fn check_address_value(address: i128, span: &Span) -> Result<u16, AssemblerError> {
@@ -103,35 +92,30 @@ fn check_address_value(address: i128, span: &Span) -> Result<u16, AssemblerError
     Ok((val as u16) & 0b0011_1111_1111)
 }
 
-fn assemble_branch(
-    span: &Span,
-    defines: &DefineMap,
-    labels: &LabelMap,
-    operation: u8,
-    address: Address,
-) -> Result<[u8; 2], AssemblerError> {
+fn assemble_branch(operation: u8, address: Address) -> Machine {
     // Format: 1110 + II + OO + IIIIIIII
     // II: upper 2 bits of 10-bit immediate
     // OO: operation code
     // IIIIIIII: lower 8 bits of 10-bit immediate
+    Machine::new(2, move |resolver| {
+        let address_original = resolver.address(address)?;
+        let address_checked = check_address_value(address_original, resolver.span)?;
 
-    let address_original = get_address_value(span, defines, labels, address)?;
-    let address_checked = check_address_value(address_original, span)?;
+        let imm_upper = ((address_checked >> 8) & 0b11) as u8; // Upper 2 bits
+        let imm_lower = (address_checked & 0xFF) as u8; // Lower 8 bits
 
-    let imm_upper = ((address_checked >> 8) & 0b11) as u8; // Upper 2 bits
-    let imm_lower = (address_checked & 0xFF) as u8; // Lower 8 bits
+        let first_byte = 0b1110 << 4 | imm_upper << 2 | (operation & 0b11);
 
-    let first_byte = 0b1110 << 4 | imm_upper << 2 | (operation & 0b11);
-
-    Ok([first_byte, imm_lower])
+        Ok(vec![first_byte, imm_lower])
+    })
 }
 
-fn assemble_implicit(operation: u8) -> u8 {
+fn assemble_implicit(operation: u8) -> Machine {
     // Format: 1111 + OOOO
-    0b1111 << 4 | (operation & 0b1111)
+    Machine::bytes(vec![0b1111 << 4 | (operation & 0b1111)])
 }
 
-fn assemble_skip(flag: SkipFlag) -> u8 {
+fn assemble_skip(flag: SkipFlag) -> Machine {
     // Format: 1111 + 1FFF
     let flag_bits = match flag {
         SkipFlag::Never => 0b000,
@@ -141,123 +125,59 @@ fn assemble_skip(flag: SkipFlag) -> u8 {
         SkipFlag::IfNotNegative => 0b100,
         SkipFlag::Always => 0b101,
     };
-    0b1111_1 << 3 | (flag_bits & 0b111)
+    Machine::bytes(vec![0b1111_1 << 3 | (flag_bits & 0b111)])
 }
 
-fn assemble_operation(
-    defines: &DefineMap,
-    labels: &LabelMap,
-    operation: OperationWithArgs,
-    span: Span,
-) -> Result<Vec<u8>, AssemblerError> {
-    let mut result = Vec::new();
-
+fn lower_operation(operation: OperationWithArgs, span: &Span) -> Result<Machine, AssemblerError> {
     let operation = match operation {
         OperationWithArgs::Clr1(r1) => OperationWithArgs::Ani2(r1, Immediate::Value(0)),
         _ => operation,
     };
 
-    match operation {
+    Ok(match operation {
         // 2 operand instructions
-        OperationWithArgs::Add2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0000, r1, r2)?);
-        }
-        OperationWithArgs::Sub2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0001, r1, r2)?);
-        }
-        OperationWithArgs::Xor2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0010, r1, r2)?);
-        }
-        OperationWithArgs::And2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0011, r1, r2)?);
-        }
-        OperationWithArgs::Or2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0100, r1, r2)?);
-        }
-        OperationWithArgs::Cmp2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0101, r1, r2)?);
-        }
-        OperationWithArgs::Cpy2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0110, r1, r2)?);
-        }
-        OperationWithArgs::Adc2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b0111, r1, r2)?);
-        }
-        OperationWithArgs::Mld2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b1000, r1, r2)?);
-        }
-        OperationWithArgs::Mst2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b1001, r1, r2)?);
-        }
-        OperationWithArgs::Pld2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b1010, r1, r2)?);
-        }
-        OperationWithArgs::Pst2(r1, r2) => {
-            result.push(assemble_2reg(&span, 0b1011, r1, r2)?);
-        }
+        OperationWithArgs::Add2(r1, r2) => assemble_2reg(span, 0b0000, r1, r2)?,
+        OperationWithArgs::Sub2(r1, r2) => assemble_2reg(span, 0b0001, r1, r2)?,
+        OperationWithArgs::Xor2(r1, r2) => assemble_2reg(span, 0b0010, r1, r2)?,
+        OperationWithArgs::And2(r1, r2) => assemble_2reg(span, 0b0011, r1, r2)?,
+        OperationWithArgs::Or2(r1, r2) => assemble_2reg(span, 0b0100, r1, r2)?,
+        OperationWithArgs::Cmp2(r1, r2) => assemble_2reg(span, 0b0101, r1, r2)?,
+        OperationWithArgs::Cpy2(r1, r2) => assemble_2reg(span, 0b0110, r1, r2)?,
+        OperationWithArgs::Adc2(r1, r2) => assemble_2reg(span, 0b0111, r1, r2)?,
+        OperationWithArgs::Mld2(r1, r2) => assemble_2reg(span, 0b1000, r1, r2)?,
+        OperationWithArgs::Mst2(r1, r2) => assemble_2reg(span, 0b1001, r1, r2)?,
+        OperationWithArgs::Pld2(r1, r2) => assemble_2reg(span, 0b1010, r1, r2)?,
+        OperationWithArgs::Pst2(r1, r2) => assemble_2reg(span, 0b1011, r1, r2)?,
 
         // 1 operand instructions
-        OperationWithArgs::Rsh1(r1) => {
-            result.push(assemble_1reg(&span, 0b00, r1)?);
-        }
-        OperationWithArgs::Inv1(r1) => {
-            result.push(assemble_1reg(&span, 0b01, r1)?);
-        }
-        OperationWithArgs::Inc1(r1) => {
-            result.push(assemble_1reg(&span, 0b10, r1)?);
-        }
-        OperationWithArgs::Dec1(r1) => {
-            result.push(assemble_1reg(&span, 0b11, r1)?);
-        }
+        OperationWithArgs::Rsh1(r1) => assemble_1reg(span, 0b00, r1)?,
+        OperationWithArgs::Inv1(r1) => assemble_1reg(span, 0b01, r1)?,
+        OperationWithArgs::Inc1(r1) => assemble_1reg(span, 0b10, r1)?,
+        OperationWithArgs::Dec1(r1) => assemble_1reg(span, 0b11, r1)?,
 
         // Immediate instructions
-        OperationWithArgs::Ldi2(r1, imm) => {
-            let bytes = assemble_immediate(&span, defines, 0b00, r1, imm)?;
-            result.extend_from_slice(&bytes);
-        }
-        OperationWithArgs::Adi2(r1, imm) => {
-            let bytes = assemble_immediate(&span, defines, 0b01, r1, imm)?;
-            result.extend_from_slice(&bytes);
-        }
-        OperationWithArgs::Cpi2(r1, imm) => {
-            let bytes = assemble_immediate(&span, defines, 0b10, r1, imm)?;
-            result.extend_from_slice(&bytes);
-        }
-        OperationWithArgs::Ani2(r1, imm) => {
-            let bytes = assemble_immediate(&span, defines, 0b11, r1, imm)?;
-            result.extend_from_slice(&bytes);
-        }
+        OperationWithArgs::Ldi2(r1, imm) => assemble_immediate(span, 0b00, r1, imm)?,
+        OperationWithArgs::Adi2(r1, imm) => assemble_immediate(span, 0b01, r1, imm)?,
+        OperationWithArgs::Cpi2(r1, imm) => assemble_immediate(span, 0b10, r1, imm)?,
+        OperationWithArgs::Ani2(r1, imm) => assemble_immediate(span, 0b11, r1, imm)?,
 
-        OperationWithArgs::Jmp(addr) => {
-            let bytes = assemble_branch(&span, defines, labels, 0b00, addr)?;
-            result.extend_from_slice(&bytes);
-        }
-        OperationWithArgs::Cal(addr) => {
-            let bytes = assemble_branch(&span, defines, labels, 0b01, addr)?;
-            result.extend_from_slice(&bytes);
-        }
+        OperationWithArgs::Jmp(addr) => assemble_branch(0b00, addr),
+        OperationWithArgs::Cal(addr) => assemble_branch(0b01, addr),
 
         // Implicit instructions (except skip)
-        OperationWithArgs::Bkl => {
-            result.push(assemble_implicit(0b0000));
-        }
-        OperationWithArgs::Bkr => {
-            result.push(assemble_implicit(0b0001));
-        }
-        OperationWithArgs::Hlt => {
-            result.push(assemble_implicit(0b0010));
-        }
-        OperationWithArgs::Ret => {
-            result.push(assemble_implicit(0b0011));
-        }
+        OperationWithArgs::Bkl => assemble_implicit(0b0000),
+        OperationWithArgs::Bkr => assemble_implicit(0b0001),
+        OperationWithArgs::Hlt => assemble_implicit(0b0010),
+        OperationWithArgs::Ret => assemble_implicit(0b0011),
 
         // Skip instructions
-        OperationWithArgs::Skp(flag) => {
-            result.push(assemble_skip(flag));
+        OperationWithArgs::Skp(flag) => assemble_skip(flag),
+
+        _ => {
+            return Err(AssemblerError::UnsupportedOperation(
+                span.clone(),
+                operation,
+            ));
         }
-
-        _ => return Err(AssemblerError::UnsupportedOperation(span, operation)),
-    }
-
-    Ok(result)
+    })
 }

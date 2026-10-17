@@ -3,12 +3,11 @@ use std::collections::HashMap;
 use thiserror::Error;
 
 use crate::{
-    assembler::backends::Target,
+    assembler::backends::{Lowered, Machine, Resolver, Target},
     lexer::token::{Condition, Span},
     parser::{
-        DefineMap, DefineSpanMap, LabelSpanMap, ParsedItem, ParserError, ParserResult,
-        ReferenceMap,
-        operations::{Address, Immediate, Offset, OperationWithArgs, SpannedOperation},
+        DefineMap, DefineSpanMap, LabelSpanMap, ParserError, ParserResult, ReferenceMap,
+        operations::{Address, Immediate, Offset, OperationWithArgs},
     },
 };
 
@@ -89,40 +88,37 @@ impl Assembler {
             errors.push(e);
         }
 
-        errors.extend(self.target.validate(&items));
+        let (lowered, lower_errors) = self.target.lower(&items);
+        errors.extend(lower_errors);
 
+        // Lay out the program, giving every label its address
         let mut labels: LabelMap = HashMap::new();
-        let mut instruction_count = 0;
-        let mut operations = Vec::new();
-        // The operation directly before each one, reset by labels since a jump can land there
-        let mut previous: Option<OperationWithArgs> = None;
-        for item in items {
+        let mut address = 0;
+        for item in &lowered {
             match item {
-                ParsedItem::Label(name, _) => {
-                    labels.insert(name, instruction_count);
-                    previous = None;
+                Lowered::Label(name) => {
+                    labels.insert(name.clone(), address / self.target.bytes_per_address());
                 }
-                ParsedItem::Operation(spanned_op) => {
-                    let byte_size = self
-                        .target
-                        .instruction_byte_size(&spanned_op.op, previous.as_ref());
-                    instruction_count += byte_size;
-                    let next_previous = Some(spanned_op.op.clone());
-                    operations.push((spanned_op, std::mem::replace(&mut previous, next_previous)));
+                Lowered::Operation { machines, .. } => {
+                    address += machines.iter().map(Machine::size).sum::<usize>();
                 }
             }
         }
 
-        for (SpannedOperation { op, span }, previous) in operations {
-            match self.target.assemble_operation(
-                &self.parser_results.defines,
-                &labels,
-                op,
-                previous.as_ref(),
-                span,
-            ) {
-                Ok(mut word) => bytes.append(&mut word),
-                Err(e) => errors.push(e),
+        for item in lowered {
+            let Lowered::Operation { span, machines } = item else {
+                continue;
+            };
+            let resolver = Resolver {
+                defines: &self.parser_results.defines,
+                labels: &labels,
+                span: &span,
+            };
+            for machine in machines {
+                match machine.encode(&resolver) {
+                    Ok(mut machine_bytes) => bytes.append(&mut machine_bytes),
+                    Err(e) => errors.push(e),
+                }
             }
         }
 

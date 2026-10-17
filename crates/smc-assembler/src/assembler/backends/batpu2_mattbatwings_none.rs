@@ -2,12 +2,13 @@ use arbitrary_int::{i4, u10};
 
 use crate::{
     assembler::{
-        AssemblerError, LabelMap, backends::Target, get_address_value, get_immediate_value,
-        get_offset_value,
+        AssemblerError, LabelMap,
+        backends::{Lowered, Machine, Target, lower_each},
+        get_address_value, get_immediate_value, get_offset_value,
     },
     lexer::token::{Condition, Register, Span},
     parser::{
-        DefineMap,
+        DefineMap, ParsedItem,
         operations::{Immediate, OperationWithArgs},
     },
 };
@@ -25,29 +26,27 @@ impl Target for BatPu2 {
         &["smc"]
     }
 
+    fn bytes_per_address(&self) -> usize {
+        // Instruction memory holds 16 bit words
+        2
+    }
+
     fn insert_before(&self, defines: &mut DefineMap) -> Result<(), AssemblerError> {
         insert_before(defines)
     }
 
-    fn instruction_byte_size(
-        &self,
-        op: &OperationWithArgs,
-        _previous: Option<&OperationWithArgs>,
-    ) -> usize {
-        instruction_byte_size(op)
-    }
-
-    fn assemble_operation(
-        &self,
-        defines: &DefineMap,
-        labels: &LabelMap,
-        op: OperationWithArgs,
-        _previous: Option<&OperationWithArgs>,
-        span: Span,
-    ) -> Result<Vec<u8>, AssemblerError> {
-        Ok(assemble_operation(defines, labels, op, span)?
-            .to_be_bytes()
-            .to_vec())
+    fn lower(&self, items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
+        // Every instruction is one 16 bit word
+        lower_each(items, |op, span| {
+            let (op, span) = (op.clone(), span.clone());
+            Ok(vec![Machine::new(2, move |resolver| {
+                Ok(
+                    assemble_operation(resolver.defines, resolver.labels, op, span)?
+                        .to_be_bytes()
+                        .to_vec(),
+                )
+            })])
+        })
     }
 }
 
@@ -75,12 +74,6 @@ fn insert_before(defines: &mut DefineMap) -> Result<(), AssemblerError> {
     }
 
     Ok(())
-}
-
-fn instruction_byte_size(op: &OperationWithArgs) -> usize {
-    match op {
-        _ => 1,
-    }
 }
 
 fn assemble_operation(
