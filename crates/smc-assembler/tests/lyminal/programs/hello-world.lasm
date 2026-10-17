@@ -1,0 +1,27 @@
+LDI X 15 ; We want 16 values for our LUT
+MST [X] -1 ; Clean way to exit loop
+.init
+MOV X Y ; Sync pointer to incremented value
+INC Y X ; We need the stored value to be 1 higher than the pointer
+SWP A [X] Y ; Writes the increased value, and checks if we hit the marker
+PIZ ; Keep going until we hit marker
+JMP .init ; Only 9 bytes!
+
+; Now, until memory address 15, starting at 0, each cell points at the next cell. This lets us do...
+
+SWP A [Z] 'H'
+SWP Z [A] 'e'
+SWP A [Z] 'l'
+SWP Z [A] 'l'
+SWP A [Z] 'o'
+SWP Z [A] ','
+SWP A [Z] ' '
+SWP Z [A] 'w'
+SWP A [Z] 'o'
+SWP Z [A] 'r'
+SWP A [Z] 'l'
+SWP Z [A] 'd'
+SWP A [Z] '!'
+SWP Z [A] ' '
+SWP A [Z] ':'
+SWP Z [A] '3'

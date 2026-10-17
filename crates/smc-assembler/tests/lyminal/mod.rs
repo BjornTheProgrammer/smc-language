@@ -1,4 +1,32 @@
-use smc_assembler::{CompileError, assembler::backends::LyminalUniNone, compile};
+use smc_assembler::{
+    CompileError, assembler::backends::LyminalUniNone, compile, save::convert::convert_to_tau,
+};
+use std::{fs, path::PathBuf};
+
+pub fn test_compilation(program_name: &str) {
+    use pretty_assertions::assert_eq;
+
+    let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    path.push(format!("tests/lyminal/programs/{}.lasm", program_name));
+
+    let mut expected_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    expected_path.push(format!("tests/lyminal/expected/{}.lym", program_name));
+
+    let source = fs::read_to_string(path).expect("Should be able to read the source file");
+    let result = compile(&source, &LyminalUniNone, false).expect("compilation should succeed");
+    // Lyminal output is one byte per line, the same as Tau's
+    let lym_output = convert_to_tau(result).expect("conversion to lym should succeed");
+
+    assert_eq!(
+        lym_output,
+        fs::read_to_string(expected_path).expect("Should be able to read the expected output")
+    );
+}
+
+#[test]
+fn compiles_hello_world() {
+    test_compilation("hello-world");
+}
 
 fn assemble(source: &str) -> Vec<u8> {
     compile(source, &LyminalUniNone, false).expect("compilation should succeed")
