@@ -34,6 +34,8 @@ pub enum CompileError {
         "Missing format when generating schematic, specify format with `--format <FORMAT NAME>`"
     )]
     MissingFormat,
+    #[error("Missing target for input file extension, specify target with `--target <TARGET>`")]
+    MissingTarget,
 }
 
 pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
