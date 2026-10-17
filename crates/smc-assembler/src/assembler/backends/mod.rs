@@ -9,12 +9,14 @@ use crate::{
 };
 
 pub mod batpu2_mattbatwings_none;
+pub mod lyminal_uni_none;
 pub mod tau_analyzers_none;
 
 #[derive(Debug, Clone, PartialEq, VariantArray)]
 pub enum Backend {
     BatPU2,
     TauAnalyzersNone,
+    LyminalUniNone,
 }
 
 impl Backend {
@@ -22,6 +24,7 @@ impl Backend {
         match self {
             Backend::BatPU2 => batpu2_mattbatwings_none::insert_before(defines),
             Backend::TauAnalyzersNone => Ok(()),
+            Backend::LyminalUniNone => Ok(()),
         }
     }
 
@@ -41,6 +44,9 @@ impl Backend {
             Backend::TauAnalyzersNone => {
                 tau_analyzers_none::assemble_operation(defines, labels, op, span)
             }
+            Backend::LyminalUniNone => {
+                lyminal_uni_none::assemble_operation(defines, labels, op, span)
+            }
         }
     }
 
@@ -48,6 +54,7 @@ impl Backend {
         match self {
             Backend::BatPU2 => batpu2_mattbatwings_none::instruction_byte_size(op),
             Backend::TauAnalyzersNone => tau_analyzers_none::instruction_byte_size(op),
+            Backend::LyminalUniNone => lyminal_uni_none::instruction_byte_size(op),
         }
     }
 }
@@ -67,6 +74,7 @@ impl Backend {
         match self {
             Backend::BatPU2 => "batpu2-mattbatwings-none",
             Backend::TauAnalyzersNone => "tau-analyzers-none",
+            Backend::LyminalUniNone => "lyminal-uni-none",
         }
     }
 }
@@ -79,6 +87,10 @@ impl Register {
                 Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
             },
             Backend::TauAnalyzersNone => match self {
+                Register(0..=3) => Ok(self.0),
+                Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
+            },
+            Backend::LyminalUniNone => match self {
                 Register(0..=3) => Ok(self.0),
                 Register(_) => Err(AssemblerError::InvalidRegister(span.clone(), self.0)),
             },
