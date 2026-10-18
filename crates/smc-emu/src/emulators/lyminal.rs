@@ -25,6 +25,17 @@ pub const GAMEPAD: u8 = 253;
 pub const RESERVED: u8 = 254;
 pub const PROGRAM_COUNTER: u8 = 255;
 
+/// The CPU's status bits
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Flag {
+    Zero,
+    Carry,
+    /// The next MEM instruction is skipped
+    Predicate,
+    /// A reads its stored value instead of -1
+    AMode,
+}
+
 #[derive(Debug)]
 pub struct Lyminal {
     /// At least `ADDRESS_SPACE` bytes, so every PC value reads something
@@ -104,6 +115,17 @@ impl Lyminal {
             3 => self.a = value,
             _ => self.registers[index] = value,
         }
+    }
+
+    /// Flips a status bit, for editing the machine while paused
+    pub fn toggle_flag(&mut self, flag: Flag) {
+        let bit = match flag {
+            Flag::Zero => &mut self.zero,
+            Flag::Carry => &mut self.carry,
+            Flag::Predicate => &mut self.predicate,
+            Flag::AMode => &mut self.a_mode,
+        };
+        *bit = !*bit;
     }
 
     pub fn rom(&self) -> &[u8] {

@@ -23,7 +23,7 @@ use crate::{
     emulators::{
         Emulator,
         batpu_2::Batpu2Emulator,
-        lyminal::{self, Lyminal},
+        lyminal::{self, Flag, Lyminal},
     },
     screen::Screen,
     workspace::{Panel, Workspace},
@@ -172,6 +172,13 @@ impl App {
                 let state = self.controller.state();
                 if let Some(cpu) = self.lyminal_mut() {
                     cpu.io.gamepad = state;
+                }
+            }
+            Message::ToggleFlag(flag) => {
+                if !self.running
+                    && let Some(cpu) = self.lyminal_mut()
+                {
+                    cpu.toggle_flag(flag);
                 }
             }
             Message::SetSpeed(speed) => {
@@ -627,25 +634,39 @@ impl App {
             row![
                 container(label("FLAGS")).width(64),
                 row![
-                    flag("Z", cpu.zero()),
-                    flag("C", cpu.carry()),
-                    flag("P", cpu.predicate()),
-                    flag("A", cpu.a_mode()),
+                    self.lyminal_flag("Z", cpu.zero(), Flag::Zero),
+                    self.lyminal_flag("C", cpu.carry(), Flag::Carry),
+                    self.lyminal_flag("P", cpu.predicate(), Flag::Predicate),
+                    self.lyminal_flag("A", cpu.a_mode(), Flag::AMode),
                 ]
                 .spacing(4),
             ]
             .align_y(Alignment::Center)
             .wrap()
             .vertical_spacing(4),
-            text("P: next MEM is skipped · A: A reads its value, not -1")
-                .size(10)
-                .color(ui::TEXT_DIM),
+            text(
+                "P: next MEM is skipped · A: A reads its value, not -1 · click to flip while paused"
+            )
+            .size(10)
+            .color(ui::TEXT_DIM),
             horizontal_divider(),
             label("STATE"),
             state,
         ]
         .spacing(8)
         .into()
+    }
+
+    /// A flag tile that flips the bit when clicked while paused
+    fn lyminal_flag<'a>(&self, name: &'static str, set: bool, which: Flag) -> Element<'a, Message> {
+        let tile = flag(name, set);
+        match self.running {
+            true => tile,
+            false => mouse_area(tile)
+                .on_press(Message::ToggleFlag(which))
+                .interaction(mouse::Interaction::Pointer)
+                .into(),
+        }
     }
 
     /// Bytes up to the last non-zero byte of ROM
@@ -1144,6 +1165,7 @@ pub enum Message {
     Paste,
     Pasted(Option<String>),
     SetSpeed(u32),
+    ToggleFlag(Flag),
     ClockInput(String),
     ClockSubmit,
     Workspace(workspace::Message),
@@ -1325,6 +1347,34 @@ mod tests {
         app.notice = None;
         let _ = app.update(Message::CheckProgram);
         assert_eq!(app.notice, None, "a broken save isn't retried");
+    }
+
+    #[test]
+    fn flipping_a_flag_while_paused_changes_the_branch() {
+        let mut app = App::default();
+        let path = std::env::temp_dir().join("smc-emu-flags.lasm");
+        // Z is clear after LSI X 1, so the jump to .taken is skipped
+        std::fs::write(
+            &path,
+            "LSI X 1\nPIZ\nJMP .taken\nLSI Y 2\n.taken\nLSI Z 1\n",
+        )
+        .unwrap();
+        let _ = app.update(Message::Loaded(Some(path)));
+        let _ = app.update(Message::Step);
+        assert!(!app.lyminal().unwrap().zero());
+
+        let _ = app.update(Message::ToggleFlag(Flag::Zero));
+        assert!(app.lyminal().unwrap().zero());
+        for _ in 0..3 {
+            let _ = app.update(Message::Step);
+        }
+        let cpu = app.lyminal().unwrap();
+        assert_eq!(cpu.registers()[1], 0, "jumped over LSI Y 2");
+        assert_eq!(cpu.registers()[2], 1);
+
+        let _ = app.update(Message::Start);
+        let _ = app.update(Message::ToggleFlag(Flag::Carry));
+        assert!(!app.lyminal().unwrap().carry(), "running ignores clicks");
     }
 
     #[test]
