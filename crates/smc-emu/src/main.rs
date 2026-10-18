@@ -83,6 +83,10 @@ impl App {
             workspace: Workspace::load(),
             ..Self::default()
         };
+        // Size the screen to the machine before it draws anything
+        if let Emulator::Lyminal(cpu) = &app.emulator {
+            app.screen.show(lyminal::SCREEN_SIZE, cpu.io.pixels());
+        }
         if let Some(path) = std::env::args_os().nth(1) {
             app.load(Path::new(&path));
         }

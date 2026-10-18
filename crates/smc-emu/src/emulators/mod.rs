@@ -13,8 +13,9 @@ pub enum Emulator {
 }
 
 impl Default for Emulator {
+    /// An empty Lyminal, the only machine that runs programs so far
     fn default() -> Self {
-        Self::Batpu2(Batpu2Emulator::new())
+        Self::Lyminal(Box::new(Lyminal::new()))
     }
 }
 
