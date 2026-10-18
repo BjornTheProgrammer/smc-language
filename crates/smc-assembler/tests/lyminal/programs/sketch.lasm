@@ -1,0 +1,97 @@
+; Sketch: the D-pad moves a dot that leaves a trail, A clears the screen,
+; and the console echoes back whatever you type
+
+define screen_x 248
+define screen_y 249
+define plot 250
+define screen_control 251
+define console 252
+define gamepad 253
+
+; The cursor lives in RAM
+define cursor_x 0
+define cursor_y 1
+
+; The screen is 16x16, so coordinates wrap at 16
+define screen_mask 15
+
+; Gamepad bits
+define pad_left 1
+define pad_down 2
+define pad_right 4
+define pad_up 8
+define pad_a 32
+
+MOV Y console
+MST [Y] 'S'
+MST [Y] 'k'
+MST [Y] 'e'
+MST [Y] 't'
+MST [Y] 'c'
+MST [Y] 'h'
+MST [Y] 10
+
+; Start in the middle of the screen
+MOV Y cursor_x
+MST [Y] 8
+MOV Y cursor_y
+MST [Y] 8
+
+.loop
+; Echo a typed byte, if one is waiting (carry)
+MOV Y console
+MLD X [Y]
+PNC
+JMP .pad
+MST [Y] X
+
+.pad
+MOV Y gamepad
+MLD Z [Y]
+
+; A clears the screen
+AND A Z pad_a
+PIZ
+JMP .move_x
+MOV Y screen_control
+MST [Y] 0
+
+.move_x
+MOV Y cursor_x
+MLD X [Y]
+AND A Z pad_right
+PIZ
+JMP .not_right
+INC X
+.not_right
+AND A Z pad_left
+PIZ
+JMP .not_left
+DEC X
+.not_left
+; Wrap around the screen
+AND X X screen_mask
+MST [Y] X
+MOV Y screen_x
+MST [Y] X
+
+MOV Y cursor_y
+MLD X [Y]
+AND A Z pad_down
+PIZ
+JMP .not_down
+INC X
+.not_down
+AND A Z pad_up
+PIZ
+JMP .not_up
+DEC X
+.not_up
+AND X X screen_mask
+MST [Y] X
+MOV Y screen_y
+MST [Y] X
+
+MOV Y plot
+MST [Y] 1
+JMP .loop

@@ -1348,6 +1348,56 @@ mod tests {
     }
 
     #[test]
+    fn sketch_draws_with_the_gamepad_and_echoes_the_console() {
+        let mut app = App::default();
+        let _ = app.update(Message::Loaded(Some(PathBuf::from(format!(
+            "{PROGRAMS}/sketch.lasm"
+        )))));
+        let run = |app: &mut App, steps: usize| {
+            for _ in 0..steps {
+                let _ = app.update(Message::Step);
+            }
+        };
+        let lit = |app: &App| -> Vec<(usize, usize)> {
+            let pixels = app.lyminal().unwrap().io.pixels();
+            (0..pixels.len())
+                .filter(|&i| pixels[i])
+                .map(|i| (i % lyminal::SCREEN_SIZE, i / lyminal::SCREEN_SIZE))
+                .collect()
+        };
+        let hold = |app: &mut App, button: controller::Button, steps: usize| {
+            let _ = app.update(Message::Controller(controller::Message::Pressed(button)));
+            run(app, steps);
+            let _ = app.update(Message::Controller(controller::Message::Released(button)));
+        };
+
+        run(&mut app, 200);
+        assert_eq!(app.lyminal().unwrap().io.output(), b"Sketch\n");
+        assert_eq!(lit(&app), [(8, 8)], "starts in the middle");
+
+        // Each pass of the loop moves one pixel, leaving a trail
+        hold(&mut app, controller::Button::Right, 200);
+        hold(&mut app, controller::Button::Down, 200);
+        let trail = lit(&app);
+        assert!(
+            trail.contains(&(9, 8)) && trail.contains(&(10, 8)),
+            "{trail:?}"
+        );
+        let &(x, y) = trail.iter().max_by_key(|(x, y)| (*y, *x)).unwrap();
+        assert!(x > 8 && y > 8, "went right then down: {trail:?}");
+
+        let _ = app.update(Message::ConsoleInput("hi".to_string()));
+        let _ = app.update(Message::ConsoleSubmit);
+        run(&mut app, 300);
+        assert_eq!(app.lyminal().unwrap().io.output(), b"Sketch\nhi\n");
+
+        // A clears everything but the dot it keeps drawing
+        hold(&mut app, controller::Button::A, 100);
+        run(&mut app, 100);
+        assert_eq!(lit(&app), [(x, y)]);
+    }
+
+    #[test]
     fn console_and_gamepad_reach_the_program() {
         let mut app = App::default();
         let path = std::env::temp_dir().join("smc-emu-echo.lasm");
