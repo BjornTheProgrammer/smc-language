@@ -13,7 +13,7 @@ use smc_assembler::isa::lyminal::{A, Instruction, Opcode, join_immediate};
 /// Bytes of ROM the 8 bit program counter can address
 pub const ADDRESS_SPACE: usize = 256;
 pub const RAM_SIZE: usize = 240;
-pub const SCREEN_SIZE: usize = 32;
+pub const SCREEN_SIZE: usize = 16;
 
 // MMIO ports. 240..=247 are left for user defined hardware.
 pub const SCREEN_X: u8 = 248;
