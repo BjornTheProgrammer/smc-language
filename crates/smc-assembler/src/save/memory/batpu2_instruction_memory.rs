@@ -97,9 +97,10 @@ pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
         let _ = region.set_block([0, 1, 2].map(|axis| pos[axis] - min[axis]), block);
     }
 
-    // You stand on address 0's first bit, the north-east corner of the top layer
+    // You stand one block east of address 0's first bit (the north-east corner of the
+    // top layer), level with it
     let [x, y, z] = pos_list[0];
-    let stand = [x, y + 1, z];
+    let stand = [x + 1, y, z];
 
     let mut schematic = Schematic::new();
     // Saved as Sponge v3, which WorldEdit 7.3+ reads
@@ -116,7 +117,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pastes_standing_on_the_first_bit_in_1_21_8() {
+    fn pastes_standing_beside_the_first_bit_in_1_21_8() {
         let path = std::env::temp_dir().join("smc-batpu2-memory.schem");
         let path = path.to_str().unwrap();
         make_schematic(vec![0xFF, 0xFF])
@@ -130,6 +131,6 @@ mod tests {
             DataVersion::Java_1_21_8 as i32
         );
         assert_eq!(loaded.metadata.schem_version, 3);
-        assert_eq!(loaded.metadata.schem_offset, [-107, -33, 0]);
+        assert_eq!(loaded.metadata.schem_offset, [-108, -32, 0]);
     }
 }
