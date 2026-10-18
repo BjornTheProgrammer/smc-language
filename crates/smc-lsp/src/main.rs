@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use smc_assembler::assembler::backends;
 use smc_assembler::assembler::{AssembledInstruction, Assembler, AssemblerError, LabelMap};
-use smc_assembler::lexer::token::Span;
+use smc_assembler::lexer::token::{Span, Token};
 use smc_assembler::lexer::{Lexer, LexerError};
 use smc_assembler::parser::{
     DefineMap, DefineSpanMap, LabelSpanMap, Parser, ParserError, ReferenceMap,
@@ -69,6 +69,18 @@ impl LanguageServer for Backend {
                 inlay_hint_provider: Some(OneOf::Left(true)),
                 definition_provider: Some(OneOf::Left(true)),
                 references_provider: Some(OneOf::Left(true)),
+                semantic_tokens_provider: Some(
+                    SemanticTokensServerCapabilities::SemanticTokensOptions(
+                        SemanticTokensOptions {
+                            legend: SemanticTokensLegend {
+                                token_types: TOKEN_TYPES.to_vec(),
+                                token_modifiers: Vec::new(),
+                            },
+                            full: Some(SemanticTokensFullOptions::Bool(true)),
+                            ..Default::default()
+                        },
+                    ),
+                ),
                 ..ServerCapabilities::default()
             },
         })
@@ -305,6 +317,21 @@ impl LanguageServer for Backend {
         Ok(Some(CompletionResponse::Array(items)))
     }
 
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> Result<Option<SemanticTokensResult>> {
+        let documents = self.documents.read().await;
+        let Some(definitions) = documents.get(&params.text_document.uri) else {
+            return Ok(None);
+        };
+
+        Ok(Some(SemanticTokensResult::Tokens(SemanticTokens {
+            result_id: None,
+            data: semantic_tokens(&definitions.source_text),
+        })))
+    }
+
     async fn inlay_hint(&self, params: InlayHintParams) -> Result<Option<Vec<InlayHint>>> {
         let documents = self.documents.read().await;
         let Some(definitions) = documents.get(&params.text_document.uri) else {
@@ -458,6 +485,38 @@ fn extract_span_from_error(err: &AssemblerError) -> &Span {
 }
 
 /// Convert a Span to an LSP Range
+/// The semantic token types the server reports; a token's type is its index here
+const TOKEN_TYPES: [SemanticTokenType; 1] = [SemanticTokenType::STRING];
+
+/// Character literals as semantic tokens, using the assembler's own lexer so escapes like
+/// `'\''` are colored right whatever the editor's grammar makes of them
+fn semantic_tokens(source: &str) -> Vec<SemanticToken> {
+    let mut tokens = Vec::new();
+    let mut previous = Position::new(0, 0);
+    for token in Lexer::new(source).flatten() {
+        if !matches!(token.token, Token::Char(_)) {
+            continue;
+        }
+        let start = offset_to_position(token.span.start(), source);
+        let end = offset_to_position(token.span.end(), source);
+
+        // Each token is relative to the one before it, and a literal is on one line
+        let delta_line = start.line - previous.line;
+        tokens.push(SemanticToken {
+            delta_line,
+            delta_start: match delta_line {
+                0 => start.character - previous.character,
+                _ => start.character,
+            },
+            length: end.character - start.character,
+            token_type: 0,
+            token_modifiers_bitset: 0,
+        });
+        previous = start;
+    }
+    tokens
+}
+
 fn span_to_range(span: &Span, source: &str) -> Range {
     let start = offset_to_position(span.start(), source);
     let end = offset_to_position(span.end(), source);
@@ -556,6 +615,17 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn colors_character_literals() {
+        let tokens = semantic_tokens("MST [Y] 'S'\nMOV X 1 ; 'not code'\nSWP A [Z] '\\n' ','");
+        let found: Vec<_> = tokens
+            .iter()
+            .map(|t| (t.delta_line, t.delta_start, t.length))
+            .collect();
+        // 'S' on line 0, '\n' and ',' on line 2; comments aren't tokens
+        assert_eq!(found, [(0, 8, 3), (2, 10, 4), (0, 5, 3)]);
+    }
 
     #[test]
     fn converts_lf_positions() {
