@@ -78,7 +78,7 @@ pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
     let pos_list = generate_instruction_positions();
     let blocks = instruction_blocks(&pos_list, &lines);
 
-    // The region is exactly the ROM, so pasting without -a only clears air inside it
+    // The region is exactly the ROM
     let mut min = [i32::MAX; 3];
     let mut max = [i32::MIN; 3];
     for (pos, _) in &blocks {
@@ -90,6 +90,9 @@ pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
     let shape = [0, 1, 2].map(|axis| max[axis] - min[axis] + 1);
 
     let mut region = Region::with_shape(shape);
+    // WorldEdit 7.3+ skips structure void when pasting, so a plain //paste only places
+    // the bits and leaves the circuitry between them alone
+    region.fill_with(&Block::structure_void());
     for (pos, block) in &blocks {
         let _ = region.set_block([0, 1, 2].map(|axis| pos[axis] - min[axis]), block);
     }
@@ -99,11 +102,10 @@ pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
     let stand = [x, y + 1, z];
 
     let mut schematic = Schematic::new();
-    // The BatPU-2 world is 1.18.2, which also saves `.schem` as Sponge v2 so every
-    // WorldEdit 7 can load it
-    schematic.metadata.mc_data_version = DataVersion::Java_1_18_2 as i32;
+    // Saved as Sponge v3, which WorldEdit 7.3+ reads
+    schematic.metadata.mc_data_version = DataVersion::Java_1_21_8 as i32;
     // Where the region starts relative to you, which WorldEdit applies on paste
-    schematic.metadata.schem_we_offset = Some([0, 1, 2].map(|axis| min[axis] - stand[axis]));
+    schematic.metadata.schem_offset = [0, 1, 2].map(|axis| min[axis] - stand[axis]);
 
     schematic.regions.push(region);
     Ok(schematic)
@@ -114,7 +116,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pastes_standing_on_the_first_bit_in_1_18_2() {
+    fn pastes_standing_on_the_first_bit_in_1_21_8() {
         let path = std::env::temp_dir().join("smc-batpu2-memory.schem");
         let path = path.to_str().unwrap();
         make_schematic(vec![0xFF, 0xFF])
@@ -125,9 +127,9 @@ mod tests {
         let (loaded, _) = Schematic::from_file(path).unwrap();
         assert_eq!(
             loaded.metadata.mc_data_version,
-            DataVersion::Java_1_18_2 as i32
+            DataVersion::Java_1_21_8 as i32
         );
-        assert_eq!(loaded.metadata.schem_version, 2);
-        assert_eq!(loaded.metadata.schem_we_offset, Some([-107, -33, 0]));
+        assert_eq!(loaded.metadata.schem_version, 3);
+        assert_eq!(loaded.metadata.schem_offset, [-107, -33, 0]);
     }
 }
