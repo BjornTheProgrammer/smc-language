@@ -2,7 +2,7 @@
 
 use iced::keyboard::{self, Key, key::Named};
 use iced::widget::{Space, column, container, mouse_area, row, text};
-use iced::{Alignment, Element, Length};
+use iced::{Alignment, Element, Length, Size};
 
 use crate::ui;
 
@@ -97,18 +97,26 @@ impl Controller {
         }
     }
 
-    pub fn view(&self) -> Element<'_, Message> {
+    /// The pad, scaled down to fit `size` and dropping the key hints when they don't fit
+    pub fn view(&self, size: Size) -> Element<'_, Message> {
+        // The D-pad is the tallest part: three keys and two gaps
         const KEY: f32 = 30.0;
-        let gap = || Space::new().width(KEY).height(KEY);
+        const PAD_HEIGHT: f32 = 3.0 * KEY + 4.0;
+        let scale = (size.height / PAD_HEIGHT).clamp(0.6, 1.0);
+        // Slightly short panels keep the full layout
+        let roomy = scale >= 0.9;
+        let key = KEY * scale;
+        let face_key = 40.0 * scale;
+        let gap = || Space::new().width(key).height(key);
 
         let dpad = column![
-            row![gap(), self.key(Button::Up, "▲", KEY, KEY, false), gap()],
+            row![gap(), self.key(Button::Up, "▲", key, key, false), gap()],
             row![
-                self.key(Button::Left, "◀", KEY, KEY, false),
+                self.key(Button::Left, "◀", key, key, false),
                 gap(),
-                self.key(Button::Right, "▶", KEY, KEY, false),
+                self.key(Button::Right, "▶", key, key, false),
             ],
-            row![gap(), self.key(Button::Down, "▼", KEY, KEY, false), gap()],
+            row![gap(), self.key(Button::Down, "▼", key, key, false), gap()],
         ]
         .spacing(2);
 
@@ -120,12 +128,12 @@ impl Controller {
 
         let face = row![
             column![
-                Space::new().height(18),
-                self.key(Button::B, "B", 40.0, 40.0, true)
+                Space::new().height(18.0 * scale),
+                self.key(Button::B, "B", face_key, face_key, true)
             ],
             column![
-                self.key(Button::A, "A", 40.0, 40.0, true),
-                Space::new().height(18)
+                self.key(Button::A, "A", face_key, face_key, true),
+                Space::new().height(18.0 * scale)
             ],
         ]
         .spacing(10);
@@ -143,17 +151,24 @@ impl Controller {
                 } else {
                     ui::TEXT_MUTED
                 }),
+        ]
+        .push((roomy && size.width >= 520.0).then(|| {
             text("WASD / ↑↓←→ · Z/J = B · X/K = A · Enter = Start · ⌫ = Select")
                 .size(10)
-                .color(ui::TEXT_DIM),
-        ]
+                .color(ui::TEXT_DIM)
+        }))
         .spacing(3)
         .align_x(Alignment::Center);
 
+        let middle = match roomy {
+            true => column![menu, input].spacing(12),
+            // Short panels put the input beside the menu buttons
+            false => column![row![menu, input].spacing(12).align_y(Alignment::Center)],
+        };
+
         row![
             dpad,
-            container(column![menu, input].spacing(12).align_x(Alignment::Center))
-                .center_x(Length::Fill),
+            container(middle.align_x(Alignment::Center)).center_x(Length::Fill),
             face,
         ]
         .align_y(Alignment::Center)

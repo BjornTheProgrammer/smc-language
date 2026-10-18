@@ -2,13 +2,14 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use iced::{
-    Alignment, Color, Element, Length, Subscription, Task, clipboard,
+    Alignment, Color, Element, Length, Size, Subscription, Task, clipboard,
     keyboard::{self, Modifiers},
     mouse, time,
     widget::{
-        Column, PaneGrid, Row, Space, button, column, container, mouse_area, pane_grid, row,
-        scrollable, slider, space, text, text_input,
+        Column, PaneGrid, Row, Space, button, column, container, mouse_area, pane_grid, responsive,
+        row, scrollable, scrollable::Scrollbar, slider, space, text, text_input,
     },
+    window,
 };
 
 use iced::widget::pane_grid::Edge;
@@ -45,6 +46,10 @@ fn main() -> iced::Result {
         .subscription(App::subscription)
         .theme(ui::theme())
         .title("SMC Emulator")
+        .window(window::Settings {
+            min_size: Some(Size::new(720.0, 480.0)),
+            ..window::Settings::default()
+        })
         .window_size((1280.0, 800.0))
         .centered()
         .run()
@@ -310,7 +315,7 @@ impl App {
             let body = match panel {
                 Panel::Screen => self.screen_panel(),
                 Panel::Gamepad => self.gamepad_panel(),
-                Panel::Debugger => scrollable(self.debugger()).into(),
+                Panel::Debugger => scrollable(self.debugger()).spacing(4).into(),
                 Panel::Memory => self.memory(),
                 Panel::Console => self.console(),
             };
@@ -368,10 +373,13 @@ impl App {
     }
 
     fn gamepad_panel(&self) -> Element<'_, Message> {
-        container(self.controller.view().map(Message::Controller))
-            .padding([4, 8])
-            .center_y(Length::Fill)
-            .into()
+        responsive(|size| {
+            container(self.controller.view(size).map(Message::Controller))
+                .padding([4, 8])
+                .center_y(Length::Fill)
+                .into()
+        })
+        .into()
     }
 
     fn panel_title_bar(&self, panel: Panel) -> pane_grid::TitleBar<'_, Message> {
@@ -403,12 +411,22 @@ impl App {
         .spacing(2)
         .align_y(Alignment::Center);
 
+        // Only the close button when the panel is too narrow for the dock buttons
+        let compact = button(text("×").size(14).line_height(1.0))
+            .padding([1, 6])
+            .style(ui::icon_button(false))
+            .on_press_maybe(
+                self.workspace
+                    .can_close(panel)
+                    .then_some(Message::Workspace(workspace::Message::Close(panel))),
+            );
+
         pane_grid::TitleBar::new(
             row![text("⠿").size(12).color(ui::TEXT_DIM), label(panel.title()),]
                 .spacing(8)
                 .align_y(Alignment::Center),
         )
-        .controls(Element::from(controls))
+        .controls(pane_grid::Controls::dynamic(controls, compact))
         .always_show_controls()
         .padding([4, 8])
         .style(ui::panel_header)
@@ -467,36 +485,37 @@ impl App {
         .spacing(8)
         .align_y(Alignment::Center);
 
-        let architecture = match self.emulator {
-            Emulator::Batpu2(_) => "BatPU-2",
-            Emulator::Lyminal(_) => "Lyminal",
-        };
-
+        // Groups stay whole and wrap onto more lines when the window is narrow
         let content = row![
             brand,
-            vertical_divider(),
-            run,
-            tool_button("STEP", (can_run && !self.running).then_some(Message::Step)),
-            tool_button("RESET", self.lyminal().is_some().then_some(Message::Reset)),
-            vertical_divider(),
-            tool_button("LOAD", Some(Message::Load)),
-            tool_button("CLEAR", Some(Message::Screen(screen::Message::Clear))),
-            vertical_divider(),
+            row![
+                run,
+                tool_button("STEP", (can_run && !self.running).then_some(Message::Step)),
+                tool_button("RESET", self.lyminal().is_some().then_some(Message::Reset)),
+            ]
+            .spacing(8),
+            row![
+                tool_button("LOAD", Some(Message::Load)),
+                tool_button("CLEAR", Some(Message::Screen(screen::Message::Clear))),
+            ]
+            .spacing(8),
             clock,
-            space().width(Length::Fill),
-            label("PANELS"),
-            Row::with_children(Panel::ALL.map(|panel| panel_toggle(
-                panel,
-                self.workspace.is_open(panel),
-                !self.workspace.is_open(panel) || self.workspace.can_close(panel),
-            )))
-            .spacing(4),
-            vertical_divider(),
-            label("ARCH"),
-            text(architecture).size(12).font(ui::SEMIBOLD),
+            row![
+                label("PANELS"),
+                Row::with_children(Panel::ALL.map(|panel| panel_toggle(
+                    panel,
+                    self.workspace.is_open(panel),
+                    !self.workspace.is_open(panel) || self.workspace.can_close(panel),
+                )))
+                .spacing(4),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
         ]
-        .spacing(8)
-        .align_y(Alignment::Center);
+        .spacing(16)
+        .align_y(Alignment::Center)
+        .wrap()
+        .vertical_spacing(6);
 
         container(content)
             .padding([6, 12])
@@ -552,16 +571,20 @@ impl App {
         column![
             label("REGISTERS"),
             registers,
+            // The flags move under the label when the panel is narrow
             row![
-                label("FLAGS"),
-                space().width(Length::Fill),
-                flag("Z", cpu.zero()),
-                flag("C", cpu.carry()),
-                flag("P", cpu.predicate()),
-                flag("A", cpu.a_mode()),
+                container(label("FLAGS")).width(64),
+                row![
+                    flag("Z", cpu.zero()),
+                    flag("C", cpu.carry()),
+                    flag("P", cpu.predicate()),
+                    flag("A", cpu.a_mode()),
+                ]
+                .spacing(4),
             ]
-            .spacing(4)
-            .align_y(Alignment::Center),
+            .align_y(Alignment::Center)
+            .wrap()
+            .vertical_spacing(4),
             text("P: next MEM is skipped · A: A reads its value, not -1")
                 .size(10)
                 .color(ui::TEXT_DIM),
@@ -664,10 +687,11 @@ impl App {
         ]
         .push((region == Region::Ram).then(|| tool_button("COPY TEXT", Some(Message::CopyText))))
         .push(tool_button("PASTE", paste))
-        .push(space().width(Length::Fill))
         .push(text(hint).size(10).color(ui::TEXT_DIM))
         .spacing(6)
         .align_y(Alignment::Center)
+        .wrap()
+        .vertical_spacing(4)
         .into()
     }
 
@@ -740,8 +764,13 @@ impl App {
                 scrollable(
                     Column::with_children(rows)
                         .spacing(1)
-                        .padding(iced::Padding::new(6.0).left(8.0).right(16.0)),
+                        .padding(iced::Padding::new(6.0).left(8.0)),
                 )
+                // Rows keep their width; narrow panels scroll sideways
+                .direction(scrollable::Direction::Both {
+                    vertical: Scrollbar::new().spacing(4),
+                    horizontal: Scrollbar::new().spacing(4),
+                })
                 .width(Length::Fill)
                 .height(Length::Fill),
             )
@@ -873,8 +902,14 @@ impl App {
             .spacing(4)
         };
 
+        let architecture = match self.emulator {
+            Emulator::Batpu2(_) => "BatPU-2",
+            Emulator::Lyminal(_) => "Lyminal",
+        };
+
         container(
             row![
+                item("ARCH", architecture.to_string()),
                 match self.lyminal() {
                     Some(cpu) => item("PC", format!("0x{:02X}", cpu.pc())),
                     None => item("PC", format!("0x{:03X}", self.program_pos)),
@@ -955,6 +990,7 @@ fn flag<'a>(name: &'static str, set: bool) -> Element<'a, Message> {
 
 fn label<'a>(name: &str) -> Element<'a, Message> {
     text(ui::spaced(name))
+        .wrapping(text::Wrapping::None)
         .size(9)
         .font(ui::BOLD)
         .color(ui::TEXT_MUTED)
@@ -978,29 +1014,31 @@ fn horizontal_divider<'a>() -> Element<'a, Message> {
         .into()
 }
 
-fn vertical_divider<'a>() -> Element<'a, Message> {
-    container(Space::new())
-        .width(1)
-        .height(18)
-        .style(ui::divider)
-        .into()
-}
-
 fn tool_button(label: &str, message: Option<Message>) -> Element<'_, Message> {
-    button(text(label).size(11).font(ui::BOLD))
-        .padding([5, 10])
-        .style(ui::tool_button)
-        .on_press_maybe(message)
-        .into()
+    button(
+        text(label)
+            .size(11)
+            .font(ui::BOLD)
+            .wrapping(text::Wrapping::None),
+    )
+    .padding([5, 10])
+    .style(ui::tool_button)
+    .on_press_maybe(message)
+    .into()
 }
 
 /// Opens or closes a panel; `enabled` is false for the last open panel
 fn panel_toggle<'a>(panel: Panel, open: bool, enabled: bool) -> Element<'a, Message> {
-    button(text(panel.title()).size(11).font(ui::BOLD))
-        .padding([5, 7])
-        .style(ui::tab(open))
-        .on_press_maybe(enabled.then_some(Message::Workspace(workspace::Message::Toggle(panel))))
-        .into()
+    button(
+        text(panel.title())
+            .size(11)
+            .font(ui::BOLD)
+            .wrapping(text::Wrapping::None),
+    )
+    .padding([5, 7])
+    .style(ui::tab(open))
+    .on_press_maybe(enabled.then_some(Message::Workspace(workspace::Message::Toggle(panel))))
+    .into()
 }
 
 /// A tiny window outline with a filled strip on the side the panel docks to.
