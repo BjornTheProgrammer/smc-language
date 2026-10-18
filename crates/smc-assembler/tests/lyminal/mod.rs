@@ -194,6 +194,17 @@ fn characters_are_ascii() {
 }
 
 #[test]
+fn characters_can_be_escaped() {
+    assert_eq!(assemble(r"MST [X] '\n'"), assemble("MST [X] 10"));
+    assert_eq!(assemble(r"MST [X] '\t'"), assemble("MST [X] 9"));
+    assert_eq!(assemble(r"MST [X] '\0'"), assemble("MST [X] 0"));
+    assert_eq!(assemble(r"MST [X] '\''"), assemble("MST [X] 39"));
+    assert_eq!(assemble(r"MST [X] '\\'"), assemble("MST [X] 92"));
+    // A lone backslash is still a backslash
+    assert_eq!(assemble(r"MST [X] '\'"), assemble("MST [X] 92"));
+}
+
+#[test]
 fn saves_one_byte_per_line() {
     let mut path = std::path::PathBuf::from(env!("CARGO_TARGET_TMPDIR"));
     path.push("lyminal_lines.lym");

@@ -29,7 +29,7 @@ MST [Y] 'e'
 MST [Y] 't'
 MST [Y] 'c'
 MST [Y] 'h'
-MST [Y] 10
+MST [Y] '\n'
 
 ; Start in the middle of the screen
 MOV Y cursor_x

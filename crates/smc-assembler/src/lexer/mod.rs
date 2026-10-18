@@ -148,16 +148,16 @@ impl<'a> Lexer<'a> {
                 TokenSpan::new(token, Span::new(start, start + size))
             }
             None => match self.advance() {
-                Some(b'\'' | b'"') => match self.peek(1) {
-                    Some(b'\'' | b'"') => {
-                        let character = self
-                            .advance()
-                            .expect("the closing quote was peeked after this character");
-                        self.advance();
+                Some(b'\'' | b'"') => match self.char_literal() {
+                    Some((character, length)) => {
+                        // The character, or the escape, and the closing quote
+                        for _ in 0..=length {
+                            self.advance();
+                        }
 
                         TokenSpan::new(Token::Char(character as char), Span::new(start, self.pos))
                     }
-                    Some(_) | None => {
+                    None => {
                         let original_char = self.peek(0).unwrap();
                         self.advance();
                         self.advance();
@@ -209,6 +209,23 @@ impl<'a> Lexer<'a> {
             },
         };
         Ok(token)
+    }
+
+    /// The character in a literal whose opening quote was just read, and how many bytes it
+    /// takes before the closing quote. An escape like `'\n'` takes two; a lone `'\'` is
+    /// still a backslash.
+    fn char_literal(&self) -> Option<(u8, usize)> {
+        let closes = |offset| matches!(self.peek(offset), Some(b'\'' | b'"'));
+        if self.peek(0) == Some(b'\\')
+            && closes(2)
+            && let Some(character) = self.peek(1).and_then(escaped)
+        {
+            return Some((character, 2));
+        }
+        match self.peek(0) {
+            Some(character) if closes(1) => Some((character, 1)),
+            _ => None,
+        }
     }
 
     fn read_number<N: FromStr>(&mut self) -> Result<N, LexerError> {
@@ -359,5 +376,17 @@ impl Iterator for Lexer<'_> {
                 Err(e) => return Some(Err(e)),
             }
         }
+    }
+}
+
+/// The character an escape like `\n` stands for, given the byte after the backslash
+fn escaped(byte: u8) -> Option<u8> {
+    match byte {
+        b'n' => Some(b'\n'),
+        b't' => Some(b'\t'),
+        b'r' => Some(b'\r'),
+        b'0' => Some(0),
+        b'\\' | b'\'' | b'"' => Some(byte),
+        _ => None,
     }
 }
