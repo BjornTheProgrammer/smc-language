@@ -101,31 +101,35 @@ impl canvas::Program<Message> for Screen {
                     .with_color(Color::from_rgb8(42, 48, 72)),
             );
             let gap = (cell * 0.12).max(1.0);
+            let radius = (cell * 0.12).max(1.0);
             let lit = Color::from_rgb8(255, 190, 92);
-            let glow = Color::from_rgba8(245, 165, 36, 0.18);
+            let glow = Color::from_rgba8(245, 165, 36, 0.14);
             let unlit = Color::from_rgb8(20, 23, 36);
 
+            let cell_at = |x: usize, y: usize, inset: f32| {
+                Path::rounded_rectangle(
+                    Point::new(
+                        origin.x + x as f32 * cell + inset,
+                        origin.y + y as f32 * cell + inset,
+                    ),
+                    Size::new(cell - inset * 2.0, cell - inset * 2.0),
+                    radius.into(),
+                )
+            };
+
+            // Every LED dark first, then the glow of every lit one, then the lit LEDs on
+            // top, so no cell covers another's glow and lit and dark LEDs line up
             for y in 0..self.size {
                 for x in 0..self.size {
-                    let top_left =
-                        Point::new(origin.x + x as f32 * cell, origin.y + y as f32 * cell);
-
-                    if self.pixels.contains(&(x, y)) {
-                        let bloom = cell * 0.35;
-                        frame.fill_rectangle(
-                            Point::new(top_left.x - bloom, top_left.y - bloom),
-                            Size::new(cell + bloom * 2.0, cell + bloom * 2.0),
-                            glow,
-                        );
-                        frame.fill_rectangle(top_left, Size::new(cell, cell), lit);
-                    } else {
-                        frame.fill_rectangle(
-                            Point::new(top_left.x + gap / 2.0, top_left.y + gap / 2.0),
-                            Size::new(cell - gap, cell - gap),
-                            unlit,
-                        );
-                    }
+                    frame.fill(&cell_at(x, y, gap / 2.0), unlit);
                 }
+            }
+            let bloom = -cell * 0.18;
+            for &(x, y) in &self.pixels {
+                frame.fill(&cell_at(x, y, bloom), glow);
+            }
+            for &(x, y) in &self.pixels {
+                frame.fill(&cell_at(x, y, gap / 2.0), lit);
             }
         });
 
