@@ -419,9 +419,15 @@ impl App {
     }
 
     fn gamepad_panel(&self) -> Element<'_, Message> {
+        // The pad sizes itself to the space inside the padding
+        const PADDING: [f32; 2] = [4.0, 8.0];
         responsive(|size| {
-            container(self.controller.view(size).map(Message::Controller))
-                .padding([4, 8])
+            let inner = Size::new(
+                size.width - PADDING[1] * 2.0,
+                size.height - PADDING[0] * 2.0,
+            );
+            container(self.controller.view(inner).map(Message::Controller))
+                .padding(PADDING)
                 .center_y(Length::Fill)
                 .into()
         })
