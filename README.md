@@ -92,7 +92,7 @@ Schematics also need the layout of the instruction memory they're pasted into:
 smc-assembler compile --format batpu2-instruction-memory ./minesweeper.smc ./minesweeper.schem
 ```
 
-BatPU-2 schematics are for Minecraft 1.18.2 and paste like the original tooling: put the file in `.minecraft/config/worldedit/schematics`, stand on the light gray wool at `190.5 154 -0.5` in the [BatPU-2 world](https://www.planetminecraft.com/project/new-redstone-computer/), then run `//schem load minesweeper`, `//paste -as` and `//update`.
+BatPU-2 schematics are for Minecraft 1.18.2. To paste one, put the file in `.minecraft/config/worldedit/schematics`, stand on the top block at the north-east corner of the instruction memory (address 0's first bit, at `186.5 154 1.5` in the [BatPU-2 world](https://www.planetminecraft.com/project/new-redstone-computer/)), then run `//schem load minesweeper`, `//paste -as` and `//update`. The schematic only covers the instruction memory, and `-a` keeps the air between its bits from replacing what's already there.
 
 ## Emulator
 

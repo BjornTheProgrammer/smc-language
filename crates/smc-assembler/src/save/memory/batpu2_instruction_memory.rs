@@ -1,4 +1,4 @@
-use mc_schem::{Region, Schematic, schem::DataVersion};
+use mc_schem::{Block, Region, Schematic, schem::DataVersion};
 
 use crate::{
     CompileError,
@@ -38,12 +38,10 @@ fn generate_instruction_positions() -> Vec<[i32; 3]> {
     pos_list
 }
 
-fn write_instructions(
-    region: &mut Region,
-    pos_list: &[[i32; 3]],
-    lines: &[&str],
-    offset: [i32; 3],
-) {
+/// Every block of the program, at its position relative to where the original BatPU-2
+/// tooling has you stand to paste
+fn instruction_blocks(pos_list: &[[i32; 3]], lines: &[&str]) -> Vec<([i32; 3], Block)> {
+    let mut blocks = Vec::with_capacity(lines.len() * 16);
     for (address, line) in lines.iter().enumerate() {
         let face = if address < 512 { "east" } else { "west" };
         let mut new_pos = pos_list[address];
@@ -51,40 +49,21 @@ fn write_instructions(
         let byte1 = &line[8..]; // Lower byte
         let byte2 = &line[..8]; // Upper byte
 
-        // Write lower byte
-        for char in byte1.chars() {
+        for (i, char) in byte1.chars().chain(byte2.chars()).enumerate() {
+            // A gap between the lower and upper byte
+            if i == 8 {
+                new_pos[1] -= 2;
+            }
             let block = if char == '1' {
                 make_block(&format!("minecraft:repeater[facing={}]", face))
             } else {
                 make_block("minecraft:purple_wool")
             };
-            let pos = [
-                (new_pos[0] - offset[0]),
-                (new_pos[1] - offset[1]),
-                (new_pos[2] - offset[2]),
-            ];
-            let _ = region.set_block(pos, &block);
-            new_pos[1] -= 2;
-        }
-
-        new_pos[1] -= 2;
-
-        // Write upper byte
-        for char in byte2.chars() {
-            let block = if char == '1' {
-                make_block(&format!("minecraft:repeater[facing={}]", face))
-            } else {
-                make_block("minecraft:purple_wool")
-            };
-            let pos = [
-                (new_pos[0] - offset[0]),
-                (new_pos[1] - offset[1]),
-                (new_pos[2] - offset[2]),
-            ];
-            let _ = region.set_block(pos, &block);
+            blocks.push((new_pos, block));
             new_pos[1] -= 2;
         }
     }
+    blocks
 }
 
 pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
@@ -96,20 +75,35 @@ pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
         lines.push("0000000000000000");
     }
 
-    let offset = [-130, -50, -80];
-    let shape = [150, 60, 160];
+    let pos_list = generate_instruction_positions();
+    let blocks = instruction_blocks(&pos_list, &lines);
+
+    // The region is exactly the ROM, so pasting without -a only clears air inside it
+    let mut min = [i32::MAX; 3];
+    let mut max = [i32::MIN; 3];
+    for (pos, _) in &blocks {
+        for axis in 0..3 {
+            min[axis] = min[axis].min(pos[axis]);
+            max[axis] = max[axis].max(pos[axis]);
+        }
+    }
+    let shape = [0, 1, 2].map(|axis| max[axis] - min[axis] + 1);
+
+    let mut region = Region::with_shape(shape);
+    for (pos, block) in &blocks {
+        let _ = region.set_block([0, 1, 2].map(|axis| pos[axis] - min[axis]), block);
+    }
+
+    // You stand on address 0's first bit, the north-east corner of the top layer
+    let [x, y, z] = pos_list[0];
+    let stand = [x, y + 1, z];
 
     let mut schematic = Schematic::new();
     // The BatPU-2 world is 1.18.2, which also saves `.schem` as Sponge v2 so every
     // WorldEdit 7 can load it
     schematic.metadata.mc_data_version = DataVersion::Java_1_18_2 as i32;
-    // Blocks were shifted by `offset` to fit the region; WorldEdit undoes it on paste,
-    // so the program lands where it should relative to where you stand
-    schematic.metadata.schem_we_offset = Some(offset);
-    let mut region = Region::with_shape(shape);
-
-    let pos_list = generate_instruction_positions();
-    write_instructions(&mut region, &pos_list, &lines, offset);
+    // Where the region starts relative to you, which WorldEdit applies on paste
+    schematic.metadata.schem_we_offset = Some([0, 1, 2].map(|axis| min[axis] - stand[axis]));
 
     schematic.regions.push(region);
     Ok(schematic)
@@ -120,14 +114,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pastes_relative_to_the_player_in_1_18_2() {
+    fn pastes_standing_on_the_first_bit_in_1_18_2() {
         let path = std::env::temp_dir().join("smc-batpu2-memory.schem");
         let path = path.to_str().unwrap();
-        make_schematic(vec![0xFF, 0xFF]).unwrap().save_to_file(path).unwrap();
+        make_schematic(vec![0xFF, 0xFF])
+            .unwrap()
+            .save_to_file(path)
+            .unwrap();
 
         let (loaded, _) = Schematic::from_file(path).unwrap();
-        assert_eq!(loaded.metadata.mc_data_version, DataVersion::Java_1_18_2 as i32);
+        assert_eq!(
+            loaded.metadata.mc_data_version,
+            DataVersion::Java_1_18_2 as i32
+        );
         assert_eq!(loaded.metadata.schem_version, 2);
-        assert_eq!(loaded.metadata.schem_we_offset, Some([-130, -50, -80]));
+        assert_eq!(loaded.metadata.schem_we_offset, Some([-107, -33, 0]));
     }
 }
