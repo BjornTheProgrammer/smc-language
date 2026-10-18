@@ -1,5 +1,7 @@
 use std::{fs, path::Path};
 
+use mc_schem::{Schematic, schem::WorldEdit13SaveOption};
+
 use crate::{
     CompileError,
     save::{
@@ -32,9 +34,13 @@ pub fn save_file<P: AsRef<Path>>(
 
         let schematic = format.make_schematic(data)?;
 
-        schematic
-            .save_to_file(&output.display().to_string())
-            .map_err(|e| CompileError::SchematicSaveFailed(e))?;
+        if extension == "schem" {
+            save_sponge_schematic(&schematic, output)?;
+        } else {
+            schematic
+                .save_to_file(&output.display().to_string())
+                .map_err(|e| CompileError::SchematicSaveFailed(e))?;
+        }
 
         return Ok(());
     }
@@ -59,4 +65,13 @@ pub fn save_file<P: AsRef<Path>>(
     }
 
     Err(CompileError::UnsupportedFileType)
+}
+
+/// Saves a WorldEdit `.schem`. WorldEdit 7.2 (and tools built on it, like ORE's
+/// Schemati) only recognise one whose root tag is named `Schematic`. mc_schem's
+/// `save_to_file` leaves it unnamed, but its writer version names it.
+fn save_sponge_schematic(schematic: &Schematic, output: &Path) -> Result<(), CompileError> {
+    let mut file = fs::File::create(output).map_err(CompileError::WriteFileError)?;
+    schematic.save_world_edit_13_writer(&mut file, &WorldEdit13SaveOption::default())?;
+    Ok(())
 }
