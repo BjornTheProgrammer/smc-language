@@ -3684,7 +3684,7 @@ checksum = "67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03"
 
 [[package]]
 name = "smc-assembler"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3698,7 +3698,7 @@ dependencies = [
 
 [[package]]
 name = "smc-emu"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "dirs",
  "iced",
@@ -3711,7 +3711,7 @@ dependencies = [
 
 [[package]]
 name = "smc-lsp"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "smc-assembler",
  "tokio",
@@ -3721,7 +3721,7 @@ dependencies = [
 
 [[package]]
 name = "smc-macros"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "proc-macro2",
  "quote",

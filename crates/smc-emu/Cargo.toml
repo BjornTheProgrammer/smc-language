@@ -14,7 +14,7 @@ license = false
 eula = false
 
 [dependencies]
-smc-assembler = { version = "0.3.0", path = "../smc-assembler" }
+smc-assembler = { version = "0.4.0", path = "../smc-assembler" }
 thiserror = { workspace = true }
 
 iced = { version = "0.14", features = ["canvas", "tokio"] }

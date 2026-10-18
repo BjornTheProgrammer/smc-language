@@ -18,4 +18,4 @@ tokio = { workspace = true }
 url = { workspace = true }
 
 tower-lsp = "0.20"
-smc-assembler = { version = "0.3.0", path = "../smc-assembler" }
+smc-assembler = { version = "0.4.0", path = "../smc-assembler" }
