@@ -8,6 +8,7 @@ use crate::{
 };
 
 pub mod assembler;
+pub mod isa;
 pub mod lexer;
 pub mod parser;
 pub mod save;

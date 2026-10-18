@@ -14,14 +14,13 @@ use crate::{
             fields::Field,
         },
     },
+    isa::lyminal::{A, Instruction, Opcode, REGISTER_COUNT, X, Y, Z, split_immediate},
     lexer::token::Span,
     parser::{
         ParsedItem,
         operations::{Address, Immediate, Operand},
     },
 };
-
-const REGISTER_COUNT: u8 = 4;
 
 pub struct LyminalUniNone;
 
@@ -168,18 +167,6 @@ fn register(operand: &Operand) -> Option<Register> {
     }
 }
 
-// Opcodes
-const AD: u8 = 0b00;
-const SUB: u8 = 0b01;
-const MEM: u8 = 0b10;
-const BYT: u8 = 0b11;
-
-// Register addresses
-const X: u8 = 0b00;
-const Y: u8 = 0b01;
-const Z: u8 = 0b10;
-const A: u8 = 0b11;
-
 /// Value of a `BYT` prefixed immediate, resolved once labels are known
 #[derive(Debug, Clone)]
 enum Value {
@@ -193,9 +180,9 @@ enum Value {
 #[derive(Debug, Clone)]
 enum Base {
     /// `op x y z`
-    Op(u8, u8, u8, u8),
+    Op(Opcode, u8, u8, u8),
     /// `BYT` prefix followed by `op x y imm`
-    Imm(u8, u8, u8, Value),
+    Imm(Opcode, u8, u8, Value),
     /// Load small immediate (-2..=2) into a register, using A or the SUB orthogonality patch
     Lsi(u8, Immediate),
 }
@@ -205,7 +192,7 @@ impl Base {
     fn writes_a(&self) -> bool {
         match *self {
             // MEM only loads when the destination and address differ
-            Base::Op(MEM, x, y, _) | Base::Imm(MEM, x, y, _) => x == A && x != y,
+            Base::Op(Opcode::Mem, x, y, _) | Base::Imm(Opcode::Mem, x, y, _) => x == A && x != y,
             Base::Op(_, x, ..) | Base::Imm(_, x, ..) | Base::Lsi(x, _) => x == A,
         }
     }
@@ -213,10 +200,10 @@ impl Base {
     /// Whether the result would change if executed in A mode
     fn depends_on_a_mode(&self) -> bool {
         match *self {
-            Base::Op(AD, _, y, z) => y == A || z == A,
-            Base::Op(SUB, _, y, z) => y == z || y == A || z == A,
-            Base::Op(MEM, x, y, z) if x == y && y == z => false,
-            Base::Op(MEM, x, y, z) => y == A || (x != z && z == A),
+            Base::Op(Opcode::AddAnd, _, y, z) => y == A || z == A,
+            Base::Op(Opcode::Sub, _, y, z) => y == z || y == A || z == A,
+            Base::Op(Opcode::Mem, x, y, z) if x == y && y == z => false,
+            Base::Op(Opcode::Mem, x, y, z) => y == A || (x != z && z == A),
             Base::Op(..) => false,
             Base::Imm(_, _, y, _) => y == A,
             Base::Lsi(..) => true,
@@ -293,18 +280,23 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
         Add3(x, y, z) => {
             let (x, y, z) = (r(x)?, r(y)?, r(z)?);
             // A_D adds when the first source has the lower (or equal) address
-            vec![Emit(Base::Op(AD, x, y.min(z), y.max(z)))]
+            vec![Emit(Base::Op(Opcode::AddAnd, x, y.min(z), y.max(z)))]
         }
         AddI3(x, y, imm) => match small_literal(&imm, -1..=1) {
             Some(-1) if y == a && a_mode => vec![Lower(Dec2(x, y))],
             Some(0) if y == a && a_mode => vec![Lower(Mov2(x, y))],
             Some(1) if y == a && a_mode => vec![Lower(Inc2(x, y))],
             // y - -imm
-            _ => vec![Emit(Base::Imm(SUB, r(x)?, r(y)?, Value::NegImm(imm)))],
+            _ => vec![Emit(Base::Imm(
+                Opcode::Sub,
+                r(x)?,
+                r(y)?,
+                Value::NegImm(imm),
+            ))],
         },
         Sub3(x, y, z) => {
             if y != z {
-                vec![Emit(Base::Op(SUB, r(x)?, r(y)?, r(z)?))]
+                vec![Emit(Base::Op(Opcode::Sub, r(x)?, r(y)?, r(z)?))]
             } else if y == a && a_mode {
                 // SUB A A would be !A
                 vec![Lower(AndI3(x, a, Immediate::Value(0)))]
@@ -314,7 +306,7 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
         }
         SubI3(x, y, imm) => match small_literal(&imm, -1..=1) {
             Some(v) if y == a && a_mode => vec![Lower(AddI3(x, y, Immediate::Value(-v)))],
-            _ => vec![Emit(Base::Imm(SUB, r(x)?, r(y)?, Value::Imm(imm)))],
+            _ => vec![Emit(Base::Imm(Opcode::Sub, r(x)?, r(y)?, Value::Imm(imm)))],
         },
         And3(x, y, z) => {
             if y == z {
@@ -322,17 +314,22 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
             } else {
                 let (x, y, z) = (r(x)?, r(y)?, r(z)?);
                 // A_D ands when the first source has the higher address
-                vec![Emit(Base::Op(AD, x, y.max(z), y.min(z)))]
+                vec![Emit(Base::Op(Opcode::AddAnd, x, y.max(z), y.min(z)))]
             }
         }
-        AndI3(x, y, imm) => vec![Emit(Base::Imm(AD, r(x)?, r(y)?, Value::Imm(imm)))],
+        AndI3(x, y, imm) => vec![Emit(Base::Imm(
+            Opcode::AddAnd,
+            r(x)?,
+            r(y)?,
+            Value::Imm(imm),
+        ))],
         Mov2(x, y) => match (r(x)?, r(y)?) {
             (x, y) if x == y => Vec::new(),
             // A mode patch: A + 1 - 1
-            (x, A) if a_mode => vec![Emit(Base::Op(SUB, x, Y, Y))],
+            (x, A) if a_mode => vec![Emit(Base::Op(Opcode::Sub, x, Y, Y))],
             (_, A) => vec![Lower(Lsi2(x, Immediate::Value(-1)))],
             // -1 & y
-            (x, y) => vec![Emit(Base::Op(AD, x, A, y))],
+            (x, y) => vec![Emit(Base::Op(Opcode::AddAnd, x, A, y))],
         },
         MovI2(x, imm) => match small_literal(&imm, -2..=2) {
             Some(_) => vec![Lower(Lsi2(x, imm))],
@@ -342,40 +339,40 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
         Lsi2(x, imm) => vec![Emit(Base::Lsi(r(x)?, imm))],
         Not2(x, y) => match (r(x)?, r(y)?) {
             // A mode patch: !A
-            (x, A) if a_mode => vec![Emit(Base::Op(SUB, x, A, A))],
+            (x, A) if a_mode => vec![Emit(Base::Op(Opcode::Sub, x, A, A))],
             (_, A) => vec![Lower(Lsi2(x, Immediate::Value(0)))],
             // -1 - y
-            (x, y) => vec![Emit(Base::Op(SUB, x, A, y))],
+            (x, y) => vec![Emit(Base::Op(Opcode::Sub, x, A, y))],
         },
         Inc2(x, y) => match (r(x)?, r(y)?) {
             // A mode patch: A + 2 - 1
-            (x, A) if a_mode => vec![Emit(Base::Op(SUB, x, Z, Z))],
+            (x, A) if a_mode => vec![Emit(Base::Op(Opcode::Sub, x, Z, Z))],
             (_, A) => vec![Lower(Lsi2(x, Immediate::Value(0)))],
             // y - -1
-            (x, y) => vec![Emit(Base::Op(SUB, x, y, A))],
+            (x, y) => vec![Emit(Base::Op(Opcode::Sub, x, y, A))],
         },
         Dec2(x, y) => match (r(x)?, r(y)?) {
             // A mode patch: A + 0 - 1
-            (x, A) if a_mode => vec![Emit(Base::Op(SUB, x, X, X))],
+            (x, A) if a_mode => vec![Emit(Base::Op(Opcode::Sub, x, X, X))],
             (_, A) => vec![Lower(Lsi2(x, Immediate::Value(-2)))],
             // y + -1
-            (x, y) => vec![Emit(Base::Op(AD, x, y, A))],
+            (x, y) => vec![Emit(Base::Op(Opcode::AddAnd, x, y, A))],
         },
         Mld2(x, y) => match (r(x)?, r(y)?) {
             (A, A) => return Err(invalid(span, "Cannot encode `MLD A [A]`")),
             // Load through A, then move it out in A mode
             (rx, ry) if rx == ry => vec![Lower(Mld2(a, y)), Lower(Mov2(x, a))],
-            (x, y) => vec![Emit(Base::Op(MEM, x, y, x))],
+            (x, y) => vec![Emit(Base::Op(Opcode::Mem, x, y, x))],
         },
         Mst2(x, y) => match (r(x)?, r(y)?) {
             (x, y) if x == y => {
                 return Err(invalid(span, "Cannot store a register to its own address"));
             }
-            (x, y) => vec![Emit(Base::Op(MEM, x, x, y))],
+            (x, y) => vec![Emit(Base::Op(Opcode::Mem, x, x, y))],
         },
         MstI2(x, imm) => {
             let x = r(x)?;
-            vec![Emit(Base::Imm(MEM, x, x, Value::Imm(imm)))]
+            vec![Emit(Base::Imm(Opcode::Mem, x, x, Value::Imm(imm)))]
         }
         Swp3(x, y, z) => match (r(x)?, r(y)?, r(z)?) {
             (x, y, _) if x == y => {
@@ -390,7 +387,7 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
                     "Destination and value must be different registers",
                 ));
             }
-            (x, y, z) => vec![Emit(Base::Op(MEM, x, y, z))],
+            (x, y, z) => vec![Emit(Base::Op(Opcode::Mem, x, y, z))],
         },
         SwpI3(x, y, imm) => match (r(x)?, r(y)?) {
             (x, y) if x == y => {
@@ -399,21 +396,21 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
                     "Destination and address must be different registers",
                 ));
             }
-            (x, y) => vec![Emit(Base::Imm(MEM, x, y, Value::Imm(imm)))],
+            (x, y) => vec![Emit(Base::Imm(Opcode::Mem, x, y, Value::Imm(imm)))],
         },
         // Jumps store to address -1 (the program counter), which A reads as outside A mode
-        Jmp(addr) => vec![Emit(Base::Imm(MEM, A, A, Value::Addr(addr)))],
-        JmpR(x) => vec![Emit(Base::Op(MEM, A, A, r(x)?))],
+        Jmp(addr) => vec![Emit(Base::Imm(Opcode::Mem, A, A, Value::Addr(addr)))],
+        JmpR(x) => vec![Emit(Base::Op(Opcode::Mem, A, A, r(x)?))],
         Jal2(x, y) => match (r(x)?, r(y)?) {
             (x, y) if x == y => {
                 return Err(invalid(span, "Link and target must be different registers"));
             }
-            (x, y) => vec![Emit(Base::Op(MEM, x, A, y))],
+            (x, y) => vec![Emit(Base::Op(Opcode::Mem, x, A, y))],
         },
-        JalI2(x, addr) => vec![Emit(Base::Imm(MEM, r(x)?, A, Value::Addr(addr)))],
+        JalI2(x, addr) => vec![Emit(Base::Imm(Opcode::Mem, r(x)?, A, Value::Addr(addr)))],
         Pc1(x) => {
             let x = r(x)?;
-            vec![Emit(Base::Op(MEM, x, A, x))]
+            vec![Emit(Base::Op(Opcode::Mem, x, A, x))]
         }
         Pred(flag) => {
             let f = match flag {
@@ -422,7 +419,7 @@ fn lower(op: &Op, a_mode: bool, span: &Span) -> Result<Vec<Step>, AssemblerError
                 PredicateFlag::Zero => 0b10,
                 PredicateFlag::NotZero => 0b11,
             };
-            vec![Emit(Base::Op(MEM, f, f, f))]
+            vec![Emit(Base::Op(Opcode::Mem, f, f, f))]
         }
     })
 }
@@ -561,16 +558,20 @@ impl Base {
         match self {
             Base::Op(op, x, y, z) => Machine::bytes(vec![instruction(op, x, y, z)]),
             Base::Imm(op, x, y, value) => Machine::new(2, move |resolver| {
-                let imm = resolve(resolver, value)?;
-                // BYT IIIIII holds the upper 6 bits, the next instruction's last operand the lower 2
-                Ok(vec![BYT << 6 | imm >> 2, instruction(op, x, y, imm & 0b11)])
+                let (prefix, z) = split_immediate(resolve(resolver, value)?);
+                Ok(vec![prefix, instruction(op, x, y, z)])
             }),
             Base::Lsi(x, imm) => Machine::new(1, move |resolver| {
                 match resolver.immediate(imm)? {
                     // -1 + -1
-                    -2 => Ok(vec![instruction(AD, x, A, A)]),
+                    -2 => Ok(vec![instruction(Opcode::AddAnd, x, A, A)]),
                     // Orthogonality patch: IMM - 1
-                    v @ -1..=2 => Ok(vec![instruction(SUB, x, (v + 1) as u8, (v + 1) as u8)]),
+                    v @ -1..=2 => Ok(vec![instruction(
+                        Opcode::Sub,
+                        x,
+                        (v + 1) as u8,
+                        (v + 1) as u8,
+                    )]),
                     v => Err(AssemblerError::ImmediateOutOfRange(
                         resolver.span.clone(),
                         v,
@@ -593,6 +594,6 @@ fn resolve(resolver: &Resolver, value: Value) -> Result<u8, AssemblerError> {
     })
 }
 
-fn instruction(op: u8, x: u8, y: u8, z: u8) -> u8 {
-    op << 6 | x << 4 | y << 2 | z
+fn instruction(op: Opcode, x: u8, y: u8, z: u8) -> u8 {
+    Instruction::new(op, x, y, z).encode()
 }

@@ -9,14 +9,13 @@ use crate::{
         },
         get_address_value, get_immediate_value, get_offset_value,
     },
+    isa::batpu2::{Condition, Instruction, REGISTER_COUNT},
     lexer::token::Span,
     parser::{
         DefineMap, ParsedItem,
         operations::{Address, Immediate, Offset, Operand, SpannedOperand},
     },
 };
-
-const REGISTER_COUNT: u8 = 16;
 
 pub struct BatPu2;
 
@@ -62,14 +61,6 @@ const SYNTAX: Syntax = Syntax {
     register: numbered_register,
     character,
 };
-
-#[derive(Debug, Clone)]
-enum Condition {
-    Equal,
-    NotEqual,
-    GreaterEqual,
-    Less,
-}
 
 fn condition(operand: &SpannedOperand) -> Result<Condition, AssemblerError> {
     let invalid = |text: String| AssemblerError::InvalidCondition(operand.span.clone(), text);
@@ -225,90 +216,91 @@ fn assemble_operation(
         _ => operation,
     };
 
-    match operation {
-        Op::Nop => Ok(0b0000 << 12),
-        Op::Hlt => Ok(0b0001 << 12),
-        Op::Add3(r1, r2, r3) => Ok(0b0010 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
-        Op::Sub3(r1, r2, r3) => Ok(0b0011 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
-        Op::Nor3(r1, r2, r3) => Ok(0b0100 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
-        Op::And3(r1, r2, r3) => Ok(0b0101 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
-        Op::Xor3(r1, r2, r3) => Ok(0b0110 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
-            | ((r3.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
-        Op::Rsh2(r1, r2) => Ok(0b0111 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | ((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16)),
-        Op::Ldi2(r1, immediate) => Ok(0b1000 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (IMMEDIATE.immediate(get_immediate_value(&span, defines, immediate)?, &span)?
-                as u16)),
-        Op::Adi2(r1, immediate) => Ok(0b1001 << 12
-            | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-            | (IMMEDIATE.immediate(get_immediate_value(&span, defines, immediate)?, &span)?
-                as u16)),
-        Op::Jmp(address) => Ok(0b1010 << 12
-            | ADDRESS.address(get_address_value(&span, defines, labels, address)?, &span)? as u16),
-        Op::Brh(condition, address) => {
-            let condition = match condition {
-                Condition::Equal => 0b00,
-                Condition::NotEqual => 0b01,
-                Condition::GreaterEqual => 0b10,
-                Condition::Less => 0b11,
-            };
+    let r = |register: Register| register.check(REGISTER_COUNT, &span);
+    let immediate = |immediate| -> Result<u8, AssemblerError> {
+        let value = get_immediate_value(&span, defines, immediate)?;
+        Ok(IMMEDIATE.immediate(value, &span)? as u8)
+    };
+    let address = |address| -> Result<u16, AssemblerError> {
+        let value = get_address_value(&span, defines, labels, address)?;
+        Ok(ADDRESS.address(value, &span)? as u16)
+    };
+    let offset = |offset: Option<Offset>| -> Result<i8, AssemblerError> {
+        let Some(offset) = offset else {
+            return Ok(0);
+        };
+        let value = get_offset_value(&span, defines, offset)?;
+        // Range checked, so it fits
+        OFFSET.offset(value, &span)?;
+        Ok(value as i8)
+    };
 
-            Ok(0b1011 << 12
-                | (condition << 10)
-                | ADDRESS.address(get_address_value(&span, defines, labels, address)?, &span)?
-                    as u16)
-        }
-        Op::Cal(address) => Ok(0b1100 << 12
-            | (ADDRESS.address(get_address_value(&span, defines, labels, address)?, &span)?
-                as u16
-                & 0b0000_0011_1111_1111)),
-        Op::Ret => Ok(0b1101_0000_0000_0000),
-        Op::Lod(r1, r2, offset) => {
-            let offset = match offset {
-                Some(offset) => {
-                    OFFSET.offset(get_offset_value(&span, defines, offset)?, &span)? as u16
-                }
-                None => 0,
-            };
-
-            Ok(0b1110 << 12
-                | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-                | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
-                | offset)
-        }
-        Op::Str(r1, r2, offset) => {
-            let offset = match offset {
-                Some(offset) => {
-                    OFFSET.offset(get_offset_value(&span, defines, offset)?, &span)? as u16
-                }
-                None => 0,
-            };
-
-            Ok(0b1111 << 12
-                | (((r1.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 8)
-                | (((r2.check(REGISTER_COUNT, &span)? & 0xF) as u16) << 4)
-                | offset)
-        }
+    let instruction = match operation {
+        Op::Nop => Instruction::Nop,
+        Op::Hlt => Instruction::Hlt,
+        Op::Add3(a, b, c) => Instruction::Add {
+            a: r(a)?,
+            b: r(b)?,
+            c: r(c)?,
+        },
+        Op::Sub3(a, b, c) => Instruction::Sub {
+            a: r(a)?,
+            b: r(b)?,
+            c: r(c)?,
+        },
+        Op::Nor3(a, b, c) => Instruction::Nor {
+            a: r(a)?,
+            b: r(b)?,
+            c: r(c)?,
+        },
+        Op::And3(a, b, c) => Instruction::And {
+            a: r(a)?,
+            b: r(b)?,
+            c: r(c)?,
+        },
+        Op::Xor3(a, b, c) => Instruction::Xor {
+            a: r(a)?,
+            b: r(b)?,
+            c: r(c)?,
+        },
+        Op::Rsh2(a, c) => Instruction::Rsh { a: r(a)?, c: r(c)? },
+        Op::Ldi2(a, imm) => Instruction::Ldi {
+            a: r(a)?,
+            immediate: immediate(imm)?,
+        },
+        Op::Adi2(a, imm) => Instruction::Adi {
+            a: r(a)?,
+            immediate: immediate(imm)?,
+        },
+        Op::Jmp(addr) => Instruction::Jmp {
+            address: address(addr)?,
+        },
+        Op::Brh(condition, addr) => Instruction::Brh {
+            condition,
+            address: address(addr)?,
+        },
+        Op::Cal(addr) => Instruction::Cal {
+            address: address(addr)?,
+        },
+        Op::Ret => Instruction::Ret,
+        Op::Lod(a, b, o) => Instruction::Lod {
+            a: r(a)?,
+            b: r(b)?,
+            offset: offset(o)?,
+        },
+        Op::Str(a, b, o) => Instruction::Str {
+            a: r(a)?,
+            b: r(b)?,
+            offset: offset(o)?,
+        },
         // Pseudo instructions were rewritten above
-        _ => Err(AssemblerError::InvalidOperands(
-            span,
-            format!("Cannot encode `{operation:?}`"),
-        )),
-    }
+        _ => {
+            return Err(AssemblerError::InvalidOperands(
+                span,
+                format!("Cannot encode `{operation:?}`"),
+            ));
+        }
+    };
+
+    Ok(instruction.encode())
 }

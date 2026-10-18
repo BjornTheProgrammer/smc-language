@@ -8,18 +8,12 @@
 
 use std::collections::VecDeque;
 
+use smc_assembler::isa::lyminal::{A, Instruction, Opcode, join_immediate};
+
 /// Bytes of ROM the 8 bit program counter can address
 pub const ADDRESS_SPACE: usize = 256;
 pub const RAM_SIZE: usize = 240;
 pub const SCREEN_SIZE: usize = 32;
-
-// Opcodes
-const AD: u8 = 0b00;
-const SUB: u8 = 0b01;
-const BYT: u8 = 0b11;
-
-/// Register A, which reads -1 outside A mode
-const A: u8 = 0b11;
 
 // MMIO ports. 240..=247 are left for user defined hardware.
 pub const SCREEN_X: u8 = 248;
@@ -224,27 +218,23 @@ impl Lyminal {
             return;
         }
 
-        let mut instruction = self.fetch();
+        let mut byte = self.fetch();
         let mut immediate = None;
-        while instruction >> 6 == BYT {
+        while Opcode::decode(byte) == Opcode::Byt {
             // A prefix at 255 has no instruction left to modify
             if self.pc_overflowed {
                 self.halted = true;
                 return;
             }
-            let upper = instruction & 0b11_1111;
-            instruction = self.fetch();
-            immediate = Some(upper << 2 | (instruction & 0b11));
+            let prefix = byte;
+            byte = self.fetch();
+            immediate = Some(join_immediate(prefix, Instruction::decode(byte).z));
         }
         self.cycles += 1;
 
-        let opcode = instruction >> 6;
-        let x = (instruction >> 4) & 0b11;
-        let y = (instruction >> 2) & 0b11;
-        let z = instruction & 0b11;
-
+        let Instruction { opcode, x, y, z } = Instruction::decode(byte);
         let wrote_a = match opcode {
-            AD => {
+            Opcode::AddAnd => {
                 let a = self.read_register(y);
                 let (result, carry) = match immediate {
                     Some(imm) => (a & imm, false),
@@ -255,7 +245,7 @@ impl Lyminal {
                 self.set_flags(result, carry);
                 self.write_register(x, result)
             }
-            SUB => {
+            Opcode::Sub => {
                 let (result, carry) = match immediate {
                     Some(imm) => subtract(self.read_register(y), imm),
                     None if y != z => subtract(self.read_register(y), self.read_register(z)),
@@ -267,8 +257,8 @@ impl Lyminal {
                 self.set_flags(result, carry);
                 self.write_register(x, result)
             }
-            // MEM, since BYT prefixes are consumed above
-            _ => self.memory(x, y, z, immediate),
+            Opcode::Mem => self.memory(x, y, z, immediate),
+            Opcode::Byt => unreachable!("BYT prefixes are consumed above"),
         };
 
         self.a_mode = wrote_a;
