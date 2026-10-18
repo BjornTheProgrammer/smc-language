@@ -1,4 +1,4 @@
-use mc_schem::{Region, Schematic};
+use mc_schem::{Region, Schematic, schem::DataVersion};
 
 use crate::{
     CompileError,
@@ -100,6 +100,12 @@ pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
     let shape = [150, 60, 160];
 
     let mut schematic = Schematic::new();
+    // The BatPU-2 world is 1.18.2, which also saves `.schem` as Sponge v2 so every
+    // WorldEdit 7 can load it
+    schematic.metadata.mc_data_version = DataVersion::Java_1_18_2 as i32;
+    // Blocks were shifted by `offset` to fit the region; WorldEdit undoes it on paste,
+    // so the program lands where it should relative to where you stand
+    schematic.metadata.schem_we_offset = Some(offset);
     let mut region = Region::with_shape(shape);
 
     let pos_list = generate_instruction_positions();
@@ -107,4 +113,21 @@ pub fn make_schematic(data: Vec<u8>) -> Result<Schematic, CompileError> {
 
     schematic.regions.push(region);
     Ok(schematic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pastes_relative_to_the_player_in_1_18_2() {
+        let path = std::env::temp_dir().join("smc-batpu2-memory.schem");
+        let path = path.to_str().unwrap();
+        make_schematic(vec![0xFF, 0xFF]).unwrap().save_to_file(path).unwrap();
+
+        let (loaded, _) = Schematic::from_file(path).unwrap();
+        assert_eq!(loaded.metadata.mc_data_version, DataVersion::Java_1_18_2 as i32);
+        assert_eq!(loaded.metadata.schem_version, 2);
+        assert_eq!(loaded.metadata.schem_we_offset, Some([-130, -50, -80]));
+    }
 }

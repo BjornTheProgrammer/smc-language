@@ -24,7 +24,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 
-mc_schem = "1.1"
+mc_schem = "1.2"
 
 [dev-dependencies]
 pretty_assertions = "1"

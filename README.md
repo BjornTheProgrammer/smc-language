@@ -92,6 +92,8 @@ Schematics also need the layout of the instruction memory they're pasted into:
 smc-assembler compile --format batpu2-instruction-memory ./minesweeper.smc ./minesweeper.schem
 ```
 
+BatPU-2 schematics are for Minecraft 1.18.2 and paste like the original tooling: put the file in `.minecraft/config/worldedit/schematics`, stand on the light gray wool at `190.5 154 -0.5` in the [BatPU-2 world](https://www.planetminecraft.com/project/new-redstone-computer/), then run `//schem load minesweeper`, `//paste -as` and `//update`.
+
 ## Emulator
 
 `smc-emu` runs Lyminal programs, either assembly (`.lasm`) or assembled binaries (`.lym`). Open one with LOAD, or pass it on the command line:
