@@ -1,3 +1,6 @@
+// No console window behind the GUI on Windows; debug builds keep it for logs
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
