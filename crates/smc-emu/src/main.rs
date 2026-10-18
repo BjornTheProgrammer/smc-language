@@ -2,7 +2,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use iced::{
     Alignment, Color, Element, Length, Size, Subscription, Task, clipboard,
@@ -43,6 +43,8 @@ const CLOCK_MAX: u32 = 1_000_000;
 const SLIDER_MAX: u32 = 1000;
 /// How often the run loop executes a batch of instructions
 const TICK: Duration = Duration::from_millis(16);
+/// How often the loaded program's file is checked for changes
+const RELOAD_CHECK: Duration = Duration::from_millis(500);
 
 fn main() -> iced::Result {
     iced::application(App::new, App::update, App::view)
@@ -72,6 +74,8 @@ pub struct App {
     workspace: Workspace,
     /// The loaded program's file, which RESET keeps
     program_path: Option<PathBuf>,
+    /// When that file was last changed, to reload it when it's saved again
+    program_modified: Option<SystemTime>,
     /// The last load result or error, shown in the status bar and console
     notice: Option<String>,
     console_input: String,
@@ -136,6 +140,7 @@ impl App {
             }
             Message::Loaded(None) => {}
             Message::Tick => self.run_tick(),
+            Message::CheckProgram => self.reload_if_changed(),
             Message::ConsoleInput(input) => self.console_input = input,
             Message::ConsoleSubmit => {
                 let mut line = std::mem::take(&mut self.console_input).into_bytes();
@@ -192,10 +197,14 @@ impl App {
 
     pub fn subscription(&self) -> Subscription<Message> {
         let keys = keyboard::listen().map(Message::Key);
-        match self.running {
-            true => Subscription::batch([keys, time::every(TICK).map(|_| Message::Tick)]),
-            false => keys,
-        }
+        let tick = self
+            .running
+            .then(|| time::every(TICK).map(|_| Message::Tick));
+        let reload = self
+            .program_path
+            .is_some()
+            .then(|| time::every(RELOAD_CHECK).map(|_| Message::CheckProgram));
+        Subscription::batch([Some(keys), tick, reload].into_iter().flatten())
     }
 
     /// Keys edit the selected bytes while paused, and press gamepad buttons otherwise
@@ -238,18 +247,52 @@ impl App {
 
     fn load(&mut self, path: &Path) {
         self.running = false;
-        match Emulator::load(path) {
-            Ok(mut emulator) => {
-                if let Emulator::Lyminal(cpu) = &mut emulator {
-                    cpu.io.gamepad = self.controller.state();
-                }
-                self.emulator = emulator;
-                self.program_path = Some(path.to_path_buf());
-                self.notice = Some(format!("Loaded {}", path.display()));
-                self.screen_version = u64::MAX;
-                self.sync_screen();
+        self.notice = Some(match self.open(path) {
+            Ok(()) => format!("Loaded {}", path.display()),
+            Err(error) => error,
+        });
+    }
+
+    /// Swaps in the program at `path` on a fresh machine, keeping the gamepad state
+    fn open(&mut self, path: &Path) -> Result<(), String> {
+        let mut emulator = Emulator::load(path)?;
+        if let Emulator::Lyminal(cpu) = &mut emulator {
+            cpu.io.gamepad = self.controller.state();
+        }
+        self.emulator = emulator;
+        self.program_path = Some(path.to_path_buf());
+        self.program_modified = modified(path);
+        self.screen_version = u64::MAX;
+        self.sync_screen();
+        Ok(())
+    }
+
+    /// Reloads the program when its file was saved since it was loaded. It keeps running
+    /// if it was; a version that doesn't assemble leaves the old one in place.
+    fn reload_if_changed(&mut self) {
+        let Some(path) = self.program_path.clone() else {
+            return;
+        };
+        // Missing while an editor swaps in the saved file, so try again next time
+        let Some(modified) = modified(&path) else {
+            return;
+        };
+        if self.program_modified == Some(modified) {
+            return;
+        }
+        // Don't retry a broken save until it changes again
+        self.program_modified = Some(modified);
+
+        let running = self.running;
+        match self.open(&path) {
+            Ok(()) => {
+                self.editor.clear();
+                self.running = running;
+                self.notice = Some(format!("Reloaded {}", path.display()));
             }
-            Err(error) => self.notice = Some(error),
+            Err(error) => {
+                self.notice = Some(format!("Reload failed, kept the last version. {error}"))
+            }
         }
     }
 
@@ -991,6 +1034,12 @@ fn flag<'a>(name: &'static str, set: bool) -> Element<'a, Message> {
         .into()
 }
 
+fn modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path)
+        .and_then(|meta| meta.modified())
+        .ok()
+}
+
 fn label<'a>(name: &str) -> Element<'a, Message> {
     text(ui::spaced(name))
         .wrapping(text::Wrapping::None)
@@ -1079,6 +1128,7 @@ pub enum Message {
     Load,
     Loaded(Option<PathBuf>),
     Tick,
+    CheckProgram,
     ConsoleInput(String),
     ConsoleSubmit,
     Key(keyboard::Event),
@@ -1212,6 +1262,63 @@ mod tests {
         let _ = app.update(Message::Reset);
         assert!(!app.halted() && app.can_run());
         assert!(app.notice.is_none());
+    }
+
+    #[test]
+    fn reloads_the_program_when_its_file_is_saved() {
+        let path = std::env::temp_dir().join("smc-emu-reload.lasm");
+        // Saves can land within the same clock tick, so each one moves the time forward
+        let mut saved = SystemTime::now();
+        let mut save = |source: &str| {
+            std::fs::write(&path, source).unwrap();
+            saved += Duration::from_secs(1);
+            std::fs::File::options()
+                .write(true)
+                .open(&path)
+                .and_then(|file| file.set_modified(saved))
+                .unwrap();
+        };
+        save("LSI X 1\n");
+
+        let mut app = App {
+            game_speed: 1000,
+            ..App::default()
+        };
+        let _ = app.update(Message::Loaded(Some(path.clone())));
+        let first = app.lyminal().unwrap().rom()[0];
+        let _ = app.update(Message::Start);
+        let _ = app.update(Message::Tick);
+        let ran = app.lyminal().unwrap().cycles();
+        assert!(ran > 0);
+
+        let _ = app.update(Message::CheckProgram);
+        assert_eq!(
+            app.lyminal().unwrap().cycles(),
+            ran,
+            "unchanged, so not reloaded"
+        );
+
+        save("LSI Y 2\n");
+        let _ = app.update(Message::CheckProgram);
+        let cpu = app.lyminal().unwrap();
+        assert_ne!(cpu.rom()[0], first);
+        assert_eq!(cpu.cycles(), 0, "starts over");
+        assert!(app.running, "and keeps running");
+        assert!(app.notice.as_deref().unwrap().starts_with("Reloaded"));
+
+        let second = app.lyminal().unwrap().rom()[0];
+        save("NOT AN INSTRUCTION\n");
+        let _ = app.update(Message::CheckProgram);
+        assert_eq!(
+            app.lyminal().unwrap().rom()[0],
+            second,
+            "keeps the last version"
+        );
+        assert!(app.notice.as_deref().unwrap().starts_with("Reload failed"));
+
+        app.notice = None;
+        let _ = app.update(Message::CheckProgram);
+        assert_eq!(app.notice, None, "a broken save isn't retried");
     }
 
     #[test]

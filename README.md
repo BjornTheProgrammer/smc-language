@@ -100,6 +100,8 @@ smc-assembler compile --format batpu2-instruction-memory ./minesweeper.smc ./min
 smc-emu ./hello-world.lasm
 ```
 
+Saving the loaded file reloads it, so you can edit in your usual editor and watch the result. A save that doesn't assemble keeps the last working version and shows the error.
+
 * RUN, STEP and RESET control the CPU, and the clock can be set from 1 Hz to 1 MHz
 * The screen, gamepad, debugger, memory and console are panels. Pin them to any edge, stack them, resize them, or close them and reopen them from the toolbar. The layout is remembered between runs
 * While paused, click a byte in the memory panel to edit ROM, RAM or registers in hex. Shift-click selects a range to copy or paste
