@@ -6,11 +6,13 @@ An assembler and emulator for various MineCraft ISAs. Currently just an assemble
 
 Download the latest release from [here](https://github.com/BjornTheProgrammer/smc-language/releases). Each release has installers for:
 
-* `smc-assembler`, the assembler CLI
-* `smc-emu`, the emulator
-* `smc-lsp`, the language server
+* `smc-assembler`, the assembler CLI (shell, PowerShell or MSI installer)
+* `smc-lsp`, the language server (shell, PowerShell or MSI installer)
+* `smc-emu`, the emulator: `smc-emu-win-Setup.exe` on Windows, `smc-emu-osx-Setup.pkg` on macOS, and `smc-emu-linux.AppImage` (or `smc-emu-linux-arm64.AppImage`) on Linux
 
-Copies installed with the shell or PowerShell installers can update themselves: run `smc-assembler update`, click **UPDATE** in the emulator's status bar, or accept the prompt `smc-lsp` shows in your editor. The assembler also mentions a newer release after a command, checking at most once a day; set `SMC_NO_UPDATE_CHECK=1` to turn that off.
+The macOS installer isn't signed, so macOS refuses to open it at first. Right-click it, choose **Open**, and confirm.
+
+The tools can update themselves. Click **UPDATE** in the emulator's status bar when a newer release is out, and it restarts into it. For the assembler and language server installed with the shell or PowerShell installers, run `smc-assembler update`, or accept the prompt `smc-lsp` shows in your editor. The assembler also mentions a newer release after a command, checking at most once a day; set `SMC_NO_UPDATE_CHECK=1` to turn that off.
 
 ## Supported ISAs
 

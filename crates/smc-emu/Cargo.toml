@@ -7,15 +7,12 @@ edition.workspace = true
 repository.workspace = true
 description = "An emulator for the CPUs targeted by the SMC assembler."
 
-[package.metadata.wix]
-upgrade-guid = "D56FBA57-9ED4-4338-B8B3-F27162CEF725"
-path-guid = "AB6F07DB-C79D-4867-80A3-58C9DCF6082A"
-license = false
-eula = false
+# Velopack packages the emulator instead (see .github/workflows/velopack.yml)
+[package.metadata.dist]
+dist = false
 
 [dependencies]
 smc-assembler = { version = "0.4.0", path = "../smc-assembler" }
-smc-update = { version = "0.4.0", path = "../smc-update" }
 thiserror = { workspace = true }
 
 iced = { version = "0.14", features = ["advanced", "canvas", "tokio"] }
@@ -23,6 +20,7 @@ rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "t
 dirs = "6"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+velopack = "=1.2.161"
 
 [dev-dependencies]
 iced_test = "0.14"

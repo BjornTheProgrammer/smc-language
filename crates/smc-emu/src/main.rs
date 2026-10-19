@@ -35,14 +35,11 @@ pub mod emulators;
 pub mod reveal;
 pub mod screen;
 pub mod ui;
+pub mod update;
 pub mod workspace;
 
 const PROGRAM_CAPACITY: usize = 1023;
 const MEMORY_ROW_BYTES: usize = 8;
-const UPDATE: smc_update::App = smc_update::App {
-    name: "smc-emu",
-    version: env!("CARGO_PKG_VERSION"),
-};
 // Fixed row heights in the hex views and the listing, so a row's position is known when
 // scrolling to it. Both lists start LIST_TOP into their content and space rows 1px apart.
 const MEMORY_ROW_HEIGHT: f32 = 16.0;
@@ -60,11 +57,15 @@ const TICK: Duration = Duration::from_millis(16);
 const RELOAD_CHECK: Duration = Duration::from_millis(500);
 
 fn main() -> iced::Result {
+    // Velopack runs install and update hooks, and may exit or restart, so it goes first
+    velopack::VelopackApp::build().run();
+
     // Look for a newer release in the background while the window opens
     let boot = || {
+        let check = in_background(update::check);
         (
             App::new(),
-            Task::perform(UPDATE.check(), Message::UpdateChecked),
+            Task::perform(check, |update| Message::UpdateChecked(update.flatten())),
         )
     };
     iced::application(boot, App::update, App::view)
@@ -99,7 +100,7 @@ pub struct App {
     /// The program's source and the ROM bytes of each line, for assembled programs
     listing: Option<Listing>,
     /// A newer release this copy can update itself to
-    update: Option<String>,
+    update: Option<update::Update>,
     /// The listing lines selected from the source panel, as where the selection started and
     /// the line it's on now. `None` when the selection came from the memory panel.
     source_selection: Option<(usize, usize)>,
@@ -211,19 +212,16 @@ impl App {
                     cpu.io.gamepad = state;
                 }
             }
-            Message::UpdateChecked(version) => self.update = version,
+            Message::UpdateChecked(update) => self.update = update,
             Message::InstallUpdate => {
-                if let Some(version) = self.update.take() {
-                    self.notice = Some(format!("Updating to v{version}…"));
-                    return Task::perform(UPDATE.install(), Message::UpdateInstalled);
+                if let Some(update) = self.update.take() {
+                    self.notice = Some(format!("Updating to v{}…", update.version()));
+                    // Only comes back if the update failed; otherwise the emulator restarts
+                    let install = in_background(move || update::install(update));
+                    return Task::perform(install, Message::UpdateFailed);
                 }
             }
-            Message::UpdateInstalled(result) => {
-                self.notice = Some(match result {
-                    Ok(version) => format!("Updated to v{version}. Restart the emulator to use it"),
-                    Err(error) => format!("Update failed: {error}"),
-                });
-            }
+            Message::UpdateFailed(notice) => self.notice = notice,
             Message::ToggleFlag(flag) => {
                 if !self.running
                     && let Some(cpu) = self.lyminal_mut()
@@ -1281,9 +1279,9 @@ impl App {
                 .size(10)
                 .color(ui::TEXT_MUTED),
             ]
-            .push(self.update.as_ref().map(|version| {
+            .push(self.update.as_ref().map(|update| {
                 button(
-                    text(format!("UPDATE TO v{version}"))
+                    text(format!("UPDATE TO v{}", update.version()))
                         .size(10)
                         .font(ui::BOLD),
                 )
@@ -1345,6 +1343,17 @@ fn flag<'a>(name: &'static str, set: bool) -> Element<'a, Message> {
         .center_y(22)
         .style(ui::flag(set))
         .into()
+}
+
+/// Runs blocking `work` on its own thread, for a task to wait on
+fn in_background<T: Send + 'static>(
+    work: impl FnOnce() -> T + Send + 'static,
+) -> impl Future<Output = Option<T>> {
+    let (sender, receiver) = iced::futures::channel::oneshot::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(work());
+    });
+    async move { receiver.await.ok() }
 }
 
 fn modified(path: &Path) -> Option<SystemTime> {
@@ -1455,10 +1464,10 @@ pub enum Message {
     SetSpeed(u32),
     ToggleFlag(Flag),
     /// The newest release this copy can update to, if any
-    UpdateChecked(Option<String>),
+    UpdateChecked(Option<update::Update>),
     InstallUpdate,
-    /// The version installed, or why it couldn't be
-    UpdateInstalled(Result<String, String>),
+    /// Why updating didn't restart the emulator
+    UpdateFailed(Option<String>),
     ClockInput(String),
     ClockSubmit,
     Workspace(workspace::Message),

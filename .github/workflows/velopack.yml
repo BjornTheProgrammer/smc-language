@@ -1,0 +1,95 @@
+# Packages the emulator with Velopack and adds its installers and update feeds to the release
+# dist just made. dist runs it after announcing, through `post-announce-jobs`.
+name: Velopack
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  VPK_VERSION: 1.2.161
+
+jobs:
+  package:
+    name: Package smc-emu (${{ matrix.channel }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            channel: linux
+            icon: icon.png
+          - runner: ubuntu-22.04-arm
+            channel: linux-arm64
+            icon: icon.png
+          - runner: windows-2022
+            channel: win
+            icon: icon.ico
+          - runner: macos-14
+            channel: osx
+            icon: icon.icns
+    env:
+      TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ fromJson(inputs.plan).announcement_tag }}
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - name: Install vpk
+        run: dotnet tool install -g vpk --version "$VPK_VERSION"
+
+      - name: Build
+        if: runner.os != 'macOS'
+        run: |
+          cargo build --release --locked -p smc-emu
+          mkdir publish
+          cp target/release/smc-emu* publish/
+          rm -f publish/*.d publish/*.pdb
+      - name: Build (universal)
+        if: runner.os == 'macOS'
+        run: |
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --locked -p smc-emu --target aarch64-apple-darwin
+          cargo build --release --locked -p smc-emu --target x86_64-apple-darwin
+          mkdir publish
+          lipo -create -output publish/smc-emu \
+            target/aarch64-apple-darwin/release/smc-emu \
+            target/x86_64-apple-darwin/release/smc-emu
+
+      - name: Package
+        run: |
+          version="${TAG#v}"
+          exe=smc-emu
+          if [ "$RUNNER_OS" = Windows ]; then exe=smc-emu.exe; fi
+          repo="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY"
+          # The last release's packages, so this one can include a delta update from it
+          vpk download github --repoUrl "$repo" --channel "${{ matrix.channel }}" --token "$GH_TOKEN" || true
+          vpk pack \
+            --packId smc-emu \
+            --packVersion "$version" \
+            --packDir publish \
+            --mainExe "$exe" \
+            --packTitle "SMC Emulator" \
+            --packAuthors "Bjorn Beishline" \
+            --icon "crates/smc-emu/assets/${{ matrix.icon }}" \
+            --channel "${{ matrix.channel }}"
+          vpk upload github \
+            --repoUrl "$repo" \
+            --token "$GH_TOKEN" \
+            --tag "$TAG" \
+            --merge \
+            --channel "${{ matrix.channel }}"
