@@ -1,5 +1,6 @@
-# Packages the emulator with Velopack and adds its installers and update feeds to the release
-# dist just made. dist runs it after announcing, through `post-announce-jobs`.
+# Packages the emulator with Velopack, adds its installers and update feeds to the release
+# dist just made, and puts its install instructions in the notes. dist runs it after announcing,
+# through `post-announce-jobs`.
 name: Velopack
 
 on:
@@ -93,3 +94,17 @@ jobs:
             --tag "$TAG" \
             --merge \
             --channel "${{ matrix.channel }}"
+
+  notes:
+    name: Add smc-emu to the release notes
+    needs: package
+    runs-on: ubuntu-22.04
+    env:
+      TAG: ${{ fromJson(inputs.plan).announcement_tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ fromJson(inputs.plan).announcement_tag }}
+      - run: .github/scripts/velopack-notes.sh "$TAG"
