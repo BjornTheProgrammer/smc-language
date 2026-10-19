@@ -394,19 +394,33 @@ pub fn byte_cell(selected: bool, cursor: bool) -> impl Fn(&Theme) -> container::
     }
 }
 
-/// A line of the source listing: highlighted at the PC, tinted while its bytes are selected
-pub fn listing_line(current: bool, selected: bool) -> impl Fn(&Theme) -> container::Style {
-    move |_theme| container::Style {
-        background: match (current, selected) {
-            (true, _) => Some(with_alpha(ACCENT, 0.22).into()),
-            (false, true) => Some(with_alpha(ACCENT, 0.1).into()),
-            (false, false) => None,
-        },
-        border: Border {
-            radius: 2.0.into(),
-            ..Border::default()
-        },
-        ..container::Style::default()
+/// A line of the source listing that assembled to bytes. The line at the PC is filled,
+/// the line whose bytes are selected is outlined, and hovering shows it can be clicked.
+pub fn listing_line(
+    current: bool,
+    selected: bool,
+) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_theme, status| {
+        let tint = match status {
+            button::Status::Pressed => 0.3,
+            button::Status::Hovered => 0.14,
+            _ => 0.0,
+        };
+        let fill = match (current, selected) {
+            (true, _) => 0.26,
+            (false, true) => 0.16,
+            (false, false) => 0.0,
+        };
+        button::Style {
+            background: Some(with_alpha(ACCENT, f32::max(fill, tint)).into()),
+            text_color: TEXT,
+            border: Border {
+                color: if selected { ACCENT } else { Color::TRANSPARENT },
+                width: 1.0,
+                radius: 3.0.into(),
+            },
+            ..button::Style::default()
+        }
     }
 }
 

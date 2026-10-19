@@ -909,48 +909,46 @@ impl App {
                 .clone()
                 .any(|address| self.editor.is_selected(Region::Rom, address));
 
-            let row = container(
-                row![
-                    text(line.address.map(|a| format!("{a:02X}")).unwrap_or_default())
-                        .size(11)
-                        .font(ui::MONO)
-                        .color(ui::SECONDARY)
-                        .width(3.0 * CHAR),
-                    text(
-                        live.iter()
-                            .map(|b| format!("{b:02X}"))
-                            .collect::<Vec<_>>()
-                            .join(" ")
-                    )
+            let columns = row![
+                text(line.address.map(|a| format!("{a:02X}")).unwrap_or_default())
                     .size(11)
                     .font(ui::MONO)
-                    .color(if edited {
-                        ui::ACCENT_BRIGHT
-                    } else {
-                        ui::TEXT_MUTED
+                    .color(ui::SECONDARY)
+                    .width(3.0 * CHAR),
+                text(
+                    live.iter()
+                        .map(|b| format!("{b:02X}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                )
+                .size(11)
+                .font(ui::MONO)
+                .color(if edited {
+                    ui::ACCENT_BRIGHT
+                } else {
+                    ui::TEXT_MUTED
+                })
+                .width(byte_chars as f32 * CHAR),
+                text(&line.text)
+                    .size(11)
+                    .font(ui::MONO)
+                    .color(match line.address {
+                        Some(_) => ui::TEXT,
+                        None => ui::TEXT_DIM,
                     })
-                    .width(byte_chars as f32 * CHAR),
-                    text(&line.text)
-                        .size(11)
-                        .font(ui::MONO)
-                        .color(match line.address {
-                            Some(_) => ui::TEXT,
-                            None => ui::TEXT_DIM,
-                        })
-                        .wrapping(text::Wrapping::None),
-                ]
-                .spacing(10),
-            )
-            .width(width)
-            .padding([0, 4])
-            .style(ui::listing_line(current == Some(index), selected));
+                    .wrapping(text::Wrapping::None),
+            ]
+            .spacing(10);
 
+            // Only lines that became bytes can be clicked; labels and comments are context
             match line.address {
-                Some(_) => mouse_area(row)
+                Some(_) => button(columns)
+                    .width(width)
+                    .padding([1, 4])
+                    .style(ui::listing_line(current == Some(index), selected))
                     .on_press(Message::SelectLine(index))
-                    .interaction(mouse::Interaction::Pointer)
                     .into(),
-                None => row.into(),
+                None => container(columns).width(width).padding([1, 4]).into(),
             }
         });
 
@@ -1385,6 +1383,30 @@ mod tests {
         let _ = app.update(Message::SelectLine(1));
         assert_eq!(app.editor.range(), start..=start + second.bytes.len() - 1);
         assert_eq!(app.editor.region(), Some(Region::Rom));
+    }
+
+    #[test]
+    fn clicking_a_source_line_selects_its_rom_bytes() {
+        let mut app = hello_app();
+        app.workspace
+            .update(workspace::Message::Toggle(Panel::Source));
+        // INC Y X, one byte at 05
+        let text = app.listing.as_ref().unwrap().lines[4].text.clone();
+
+        let messages: Vec<Message> = {
+            let mut ui = iced_test::simulator::Simulator::with_size(
+                Default::default(),
+                (1600.0, 1000.0),
+                app.view(),
+            );
+            ui.click(text.as_str()).expect("the line is on screen");
+            ui.into_messages().collect()
+        };
+        for message in messages {
+            let _ = app.update(message);
+        }
+        assert_eq!(app.editor.region(), Some(Region::Rom));
+        assert_eq!(app.editor.range(), 5..=5);
     }
 
     #[test]
