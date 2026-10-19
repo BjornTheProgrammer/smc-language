@@ -15,6 +15,7 @@ eula = false
 
 [dependencies]
 smc-macros = { version = "0.4.0", path = "../smc-macros" }
+smc-update = { version = "0.4.0", path = "../smc-update" }
 
 anyhow = { workspace = true }
 clap = { workspace = true }

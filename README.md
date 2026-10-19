@@ -10,6 +10,8 @@ Download the latest release from [here](https://github.com/BjornTheProgrammer/sm
 * `smc-emu`, the emulator
 * `smc-lsp`, the language server
 
+Copies installed with the shell or PowerShell installers can update themselves: run `smc-assembler update`, click **UPDATE** in the emulator's status bar, or accept the prompt `smc-lsp` shows in your editor. The assembler also mentions a newer release after a command, checking at most once a day; set `SMC_NO_UPDATE_CHECK=1` to turn that off.
+
 ## Supported ISAs
 
 | Target | Source extension | Output formats |

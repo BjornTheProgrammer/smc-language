@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::thread;
 
 use anyhow::Result;
 use clap::{
@@ -12,6 +13,11 @@ use smc_assembler::{
     save::memory::Format,
 };
 use tracing::instrument;
+
+const UPDATE: smc_update::App = smc_update::App {
+    name: "smc-assembler",
+    version: env!("CARGO_PKG_VERSION"),
+};
 
 #[derive(ClapParser)]
 #[command(version, about, long_about = None)]
@@ -42,6 +48,8 @@ enum Commands {
         #[arg(long)]
         debug_artifacts: bool,
     },
+    /// Updates to the newest release, for copies installed by the release installer
+    Update,
 }
 
 fn target_parser() -> impl TypedValueParser<Value = &'static dyn Target> {
@@ -53,6 +61,12 @@ fn target_parser() -> impl TypedValueParser<Value = &'static dyn Target> {
 #[instrument]
 fn main() -> Result<()> {
     let cli = Cli::parse();
+
+    // Asks about newer releases while the command runs, at most once a day
+    let notice = match cli.command {
+        Commands::Update => None,
+        _ => Some(thread::spawn(|| UPDATE.daily_notice())),
+    };
 
     match &cli.command {
         Commands::Compile {
@@ -70,6 +84,19 @@ fn main() -> Result<()> {
                 .ok_or(CompileError::MissingTarget)?;
             compile_to_file(input, output, target, *debug_artifacts, *format)?
         }
+        Commands::Update => match UPDATE.install_blocking() {
+            Ok(version) => println!("Updated smc-assembler to v{version}"),
+            Err(error) => anyhow::bail!(
+                "Cannot update: {error}. The newest release is at \
+                 https://github.com/BjornTheProgrammer/smc-language/releases/latest"
+            ),
+        },
+    }
+
+    if let Some(Ok(Some(version))) = notice.map(thread::JoinHandle::join) {
+        eprintln!(
+            "smc-assembler v{version} is available. Run `smc-assembler update` to install it."
+        );
     }
 
     Ok(())

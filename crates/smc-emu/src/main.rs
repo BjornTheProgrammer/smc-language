@@ -35,11 +35,14 @@ pub mod emulators;
 pub mod reveal;
 pub mod screen;
 pub mod ui;
-pub mod update;
 pub mod workspace;
 
 const PROGRAM_CAPACITY: usize = 1023;
 const MEMORY_ROW_BYTES: usize = 8;
+const UPDATE: smc_update::App = smc_update::App {
+    name: "smc-emu",
+    version: env!("CARGO_PKG_VERSION"),
+};
 // Fixed row heights in the hex views and the listing, so a row's position is known when
 // scrolling to it. Both lists start LIST_TOP into their content and space rows 1px apart.
 const MEMORY_ROW_HEIGHT: f32 = 16.0;
@@ -61,7 +64,7 @@ fn main() -> iced::Result {
     let boot = || {
         (
             App::new(),
-            Task::perform(update::check(), Message::UpdateChecked),
+            Task::perform(UPDATE.check(), Message::UpdateChecked),
         )
     };
     iced::application(boot, App::update, App::view)
@@ -212,7 +215,7 @@ impl App {
             Message::InstallUpdate => {
                 if let Some(version) = self.update.take() {
                     self.notice = Some(format!("Updating to v{version}…"));
-                    return Task::perform(update::install(), Message::UpdateInstalled);
+                    return Task::perform(UPDATE.install(), Message::UpdateInstalled);
                 }
             }
             Message::UpdateInstalled(result) => {

@@ -14,6 +14,11 @@ use tower_lsp::jsonrpc::Result;
 use tower_lsp::lsp_types::*;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+const UPDATE: smc_update::App = smc_update::App {
+    name: "smc-lsp",
+    version: env!("CARGO_PKG_VERSION"),
+};
+
 #[derive(Debug)]
 struct Definitions {
     defines: DefineMap,
@@ -90,6 +95,8 @@ impl LanguageServer for Backend {
         self.client
             .log_message(MessageType::INFO, "server initialized!")
             .await;
+        // Without holding up startup
+        tokio::spawn(offer_update(self.client.clone()));
     }
 
     async fn shutdown(&self) -> Result<()> {
@@ -416,6 +423,40 @@ impl Backend {
             let _ = self.client.inlay_hint_refresh().await;
         }
     }
+}
+
+/// Asks in the editor whether to install a newer release, if there is one this copy can
+/// update to, and installs it when asked
+async fn offer_update(client: Client) {
+    let Some(version) = UPDATE.check().await else {
+        return;
+    };
+    let update = MessageActionItem {
+        title: "Update".to_string(),
+        properties: Default::default(),
+    };
+    let choice = client
+        .show_message_request(
+            MessageType::INFO,
+            format!("smc-lsp v{version} is available."),
+            Some(vec![update.clone()]),
+        )
+        .await;
+    if !matches!(choice, Ok(Some(item)) if item.title == update.title) {
+        return;
+    }
+
+    let (kind, message) = match UPDATE.install().await {
+        Ok(version) => (
+            MessageType::INFO,
+            format!("Updated smc-lsp to v{version}. Restart the language server to use it."),
+        ),
+        Err(error) => (
+            MessageType::ERROR,
+            format!("Couldn't update smc-lsp: {error}"),
+        ),
+    };
+    client.show_message(kind, message).await;
 }
 
 /// An instruction as written, then each word it assembled to with its address

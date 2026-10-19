@@ -4312,6 +4312,7 @@ dependencies = [
  "mc_schem",
  "pretty_assertions",
  "smc-macros",
+ "smc-update",
  "thiserror 2.0.17",
  "tracing",
  "tracing-subscriber",
@@ -4321,7 +4322,6 @@ dependencies = [
 name = "smc-emu"
 version = "0.4.0"
 dependencies = [
- "axoupdater",
  "dirs",
  "iced",
  "iced_test",
@@ -4329,6 +4329,7 @@ dependencies = [
  "serde",
  "serde_json",
  "smc-assembler",
+ "smc-update",
  "thiserror 2.0.17",
 ]
 
@@ -4337,6 +4338,7 @@ name = "smc-lsp"
 version = "0.4.0"
 dependencies = [
  "smc-assembler",
+ "smc-update",
  "tokio",
  "tower-lsp",
  "url",
@@ -4349,6 +4351,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "smc-update"
+version = "0.4.0"
+dependencies = [
+ "axoupdater",
+ "dirs",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
