@@ -46,6 +46,7 @@ const LISTING_ROW_HEIGHT: f32 = 18.0;
 const LIST_TOP: f32 = 6.0;
 const LISTING_ID: &str = "listing";
 const ROM_ID: &str = "rom";
+const RAM_ID: &str = "ram";
 /// The fastest clock that can be typed in, in Hz; the slider goes up to `SLIDER_MAX`
 const CLOCK_MAX: u32 = 1_000_000;
 const SLIDER_MAX: u32 = 1000;
@@ -268,33 +269,42 @@ impl App {
         }
     }
 
-    /// Scrolls the other view to the selected ROM bytes when they're off screen: ROM for a
-    /// selection made in the source panel, the source for one made in memory
+    /// Keeps the selection in view when it's off screen. The panel you're selecting in
+    /// follows its cursor, and the other one shows the whole selection.
     fn reveal_selection(&self) -> Task<Message> {
-        if self.editor.region() != Some(Region::Rom) {
+        let Some(region) = self.editor.region() else {
             return Task::none();
-        }
-        let range = self.editor.range();
-        let pitch = |height: f32| height + 1.0;
-
-        if self.source_selection.is_some() {
-            let rows = range.start() / MEMORY_ROW_BYTES..=range.end() / MEMORY_ROW_BYTES;
-            return reveal::rows(ROM_ID, LIST_TOP, pitch(MEMORY_ROW_HEIGHT), rows);
-        }
-
-        let lines: Vec<usize> = match &self.listing {
-            Some(listing) => range
-                .filter_map(|address| listing.line_at(address))
-                .collect(),
-            None => Vec::new(),
         };
-        match (lines.iter().min(), lines.iter().max()) {
-            (Some(&first), Some(&last)) => reveal::rows(
-                LISTING_ID,
-                LIST_TOP,
-                pitch(LISTING_ROW_HEIGHT),
-                first..=last,
-            ),
+        let range = self.editor.range();
+        let row = |address: usize| address / MEMORY_ROW_BYTES;
+        let memory = |rows| {
+            let id = match region {
+                Region::Rom => ROM_ID,
+                _ => RAM_ID,
+            };
+            reveal::rows(id, LIST_TOP, MEMORY_ROW_HEIGHT + 1.0, rows)
+        };
+        let listing = |lines| reveal::rows(LISTING_ID, LIST_TOP, LISTING_ROW_HEIGHT + 1.0, lines);
+
+        match (region, self.source_selection) {
+            (Region::Rom, Some((_, cursor))) => Task::batch([
+                listing(cursor..=cursor),
+                memory(row(*range.start())..=row(*range.end())),
+            ]),
+            (Region::Rom | Region::Ram, None) => {
+                let cursor = row(self.editor.cursor());
+                let own = memory(cursor..=cursor);
+                let lines: Vec<usize> = match (&self.listing, region) {
+                    (Some(listing), Region::Rom) => range
+                        .filter_map(|address| listing.line_at(address))
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                match (lines.iter().min(), lines.iter().max()) {
+                    (Some(&first), Some(&last)) => Task::batch([own, listing(first..=last)]),
+                    _ => own,
+                }
+            }
             _ => Task::none(),
         }
     }
@@ -960,7 +970,7 @@ impl App {
                 )
                 .id(match region {
                     Region::Rom => ROM_ID,
-                    _ => "ram",
+                    _ => RAM_ID,
                 })
                 // Rows keep their width; narrow panels scroll sideways
                 .direction(scrollable::Direction::Both {

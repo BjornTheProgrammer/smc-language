@@ -97,6 +97,11 @@ impl Editor {
         self.pending = None;
     }
 
+    /// The byte the arrow keys move from, at one end of the selection
+    pub fn cursor(&self) -> usize {
+        self.cursor
+    }
+
     pub fn region(&self) -> Option<Region> {
         self.region
     }
