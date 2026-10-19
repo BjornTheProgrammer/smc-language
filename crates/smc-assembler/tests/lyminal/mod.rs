@@ -187,6 +187,17 @@ fn syntax() {
 }
 
 #[test]
+fn a_mode_carries_over_lines_that_emit_nothing() {
+    // MOV X X emits nothing, so INC X X still runs right after A was written
+    assert_eq!(error_count("LSI A 0\nMOV X X\nINC X X"), 1);
+    // and A can still be read after it
+    assert_eq!(
+        assemble("MOV A X\nMOV Y Y\nINC Z A"),
+        assemble("MOV A X\nINC Z A")
+    );
+}
+
+#[test]
 fn characters_are_ascii() {
     assert_eq!(assemble("SWP A [Z] 'H'"), assemble("SWP A [Z] 72"));
     assert_eq!(assemble("SWP Z [X] ','"), assemble("SWP Z [X] 44"));

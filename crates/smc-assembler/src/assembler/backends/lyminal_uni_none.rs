@@ -538,10 +538,15 @@ fn lower_program(items: &[ParsedItem]) -> (Vec<Lowered>, Vec<AssemblerError>) {
                     ));
                 }
 
+                let emitted = !bases.is_empty();
                 lowered.push(Lowered::Operation {
                     span: span.clone(),
                     machines: bases.into_iter().map(Base::into_machine).collect(),
                 });
+                // A line like `MOV X X` runs nothing, so A mode carries over it to the next line
+                if !emitted {
+                    continue;
+                }
             }
             Err(error) => errors.push(error),
         }
