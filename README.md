@@ -8,7 +8,7 @@ Download the latest release from [here](https://github.com/BjornTheProgrammer/sm
 
 * `smc-assembler`, the assembler CLI (shell, PowerShell or MSI installer)
 * `smc-lsp`, the language server (shell, PowerShell or MSI installer)
-* `smc-emu`, the emulator: `smc-emu-win-Setup.exe` on Windows, `smc-emu-osx-Setup.pkg` on macOS, and `smc-emu-linux.AppImage` (or `smc-emu-linux-arm64.AppImage`) on Linux
+* `smc-emu`, the emulator: `smc-emu-win-Setup.exe` on Windows, `smc-emu-osx-Setup.pkg` on macOS, and `smc-emu.AppImage` (or `smc-emu-linux-arm64.AppImage`) on Linux
 
 The macOS installer isn't signed, so macOS refuses to open it at first. Right-click it, choose **Open**, and confirm.
 
