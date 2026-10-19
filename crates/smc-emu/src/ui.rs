@@ -394,6 +394,22 @@ pub fn byte_cell(selected: bool, cursor: bool) -> impl Fn(&Theme) -> container::
     }
 }
 
+/// A line of the source listing: highlighted at the PC, tinted while its bytes are selected
+pub fn listing_line(current: bool, selected: bool) -> impl Fn(&Theme) -> container::Style {
+    move |_theme| container::Style {
+        background: match (current, selected) {
+            (true, _) => Some(with_alpha(ACCENT, 0.22).into()),
+            (false, true) => Some(with_alpha(ACCENT, 0.1).into()),
+            (false, false) => None,
+        },
+        border: Border {
+            radius: 2.0.into(),
+            ..Border::default()
+        },
+        ..container::Style::default()
+    }
+}
+
 /// An inset outlined in the accent color while selected for editing
 pub fn inset_selected(selected: bool) -> impl Fn(&Theme) -> container::Style {
     move |theme| {

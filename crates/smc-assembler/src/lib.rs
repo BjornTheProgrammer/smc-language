@@ -1,7 +1,7 @@
 use std::{fs, path::Path};
 
 use crate::{
-    assembler::{Assembler, AssemblerError, backends::Target},
+    assembler::{AssembledInstruction, Assembler, AssemblerError, backends::Target},
     lexer::{Lexer, LexerError},
     parser::{Parser, ParserError},
     save::{memory::Format, save_file},
@@ -101,6 +101,27 @@ pub fn compile_to_file<P1: AsRef<Path>, P2: AsRef<Path>>(
             return Err(CompileError::CompilationFailed);
         }
     }
+}
+
+/// A program, and the bytes each of its source lines became
+#[derive(Debug)]
+pub struct Assembled {
+    pub bytes: Vec<u8>,
+    /// Every instruction, in program order, with its source span and address
+    pub instructions: Vec<AssembledInstruction>,
+}
+
+/// Like [`compile`], but also says which source line each instruction came from
+pub fn compile_with_source_map(
+    source: &str,
+    target: &'static dyn Target,
+) -> Result<Assembled, CompileError> {
+    let tokens: Vec<_> = Lexer::new(source).into_iter().collect();
+    let result = Assembler::new(target, Parser::new(tokens).parse()).assemble();
+    Ok(Assembled {
+        bytes: result.result.map_err(CompileError::AssembleError)?,
+        instructions: result.instructions,
+    })
 }
 
 pub fn compile(

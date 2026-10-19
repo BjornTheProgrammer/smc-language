@@ -1,6 +1,10 @@
 use std::path::Path;
 
-use smc_assembler::{CompileError, assembler::backends::LyminalUniNone, compile};
+use smc_assembler::{
+    Assembled, CompileError,
+    assembler::{AssembledInstruction, backends::LyminalUniNone},
+    compile_with_source_map,
+};
 
 use crate::emulators::{batpu_2::Batpu2Emulator, lyminal::Lyminal};
 
@@ -21,25 +25,78 @@ impl Default for Emulator {
 
 impl Emulator {
     /// Loads a program, picking the machine from the file extension. Lyminal assembly
-    /// (`.lasm`) is assembled first; `.lym` is one binary byte per line.
-    pub fn load(path: &Path) -> Result<Self, String> {
+    /// (`.lasm`) is assembled first, and comes with its listing; `.lym` is one binary byte
+    /// per line.
+    pub fn load(path: &Path) -> Result<(Self, Option<Listing>), String> {
         let source = std::fs::read_to_string(path)
             .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
 
-        let program = match path.extension().and_then(|ext| ext.to_str()) {
-            Some("lasm") => assemble_lyminal(&source)?,
-            Some("lym") => parse_binary_lines(&source)?,
+        let (program, listing) = match path.extension().and_then(|ext| ext.to_str()) {
+            Some("lasm") => {
+                let assembled = assemble_lyminal(&source)?;
+                let listing = Listing::new(&source, &assembled.instructions);
+                (assembled.bytes, Some(listing))
+            }
+            Some("lym") => (parse_binary_lines(&source)?, None),
             _ => return Err(format!("Unsupported program `{}`", path.display())),
         };
 
         let mut cpu = Box::new(Lyminal::new());
         cpu.load_program(&program);
-        Ok(Self::Lyminal(cpu))
+        Ok((Self::Lyminal(cpu), listing))
     }
 }
 
-fn assemble_lyminal(source: &str) -> Result<Vec<u8>, String> {
-    compile(source, &LyminalUniNone, false).map_err(|error| match error {
+/// A program's source, line by line, with the ROM bytes each line assembled to
+#[derive(Debug, Clone, Default)]
+pub struct Listing {
+    pub lines: Vec<ListingLine>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListingLine {
+    pub text: String,
+    /// Where its instruction starts in ROM, if it assembled to any bytes
+    pub address: Option<usize>,
+    /// What it assembled to; ROM may have been edited since
+    pub bytes: Vec<u8>,
+}
+
+impl Listing {
+    fn new(source: &str, instructions: &[AssembledInstruction]) -> Self {
+        let mut lines: Vec<_> = source
+            .lines()
+            .map(|text| ListingLine {
+                text: text.trim_end().to_string(),
+                address: None,
+                bytes: Vec::new(),
+            })
+            .collect();
+
+        // A line holds at most one instruction
+        for instruction in instructions.iter().filter(|i| !i.bytes.is_empty()) {
+            let start = instruction.span.start().min(source.len());
+            let number = source[..start].matches('\n').count();
+            if let Some(line) = lines.get_mut(number) {
+                line.address = Some(instruction.address);
+                line.bytes = instruction.bytes.clone();
+            }
+        }
+
+        Self { lines }
+    }
+
+    /// The line whose instruction includes the ROM byte at `address`
+    pub fn line_at(&self, address: usize) -> Option<usize> {
+        self.lines.iter().position(|line| {
+            line.address
+                .is_some_and(|start| (start..start + line.bytes.len()).contains(&address))
+        })
+    }
+}
+
+fn assemble_lyminal(source: &str) -> Result<Assembled, String> {
+    compile_with_source_map(source, &LyminalUniNone).map_err(|error| match error {
         CompileError::AssembleError(errors) => errors
             .iter()
             .map(|error| format!("Line {}: {error}", error_line(source, error)))
@@ -105,7 +162,10 @@ mod tests {
     );
 
     fn rom(path: &str) -> Vec<u8> {
-        match Emulator::load(Path::new(path)).expect("program should load") {
+        match Emulator::load(Path::new(path))
+            .expect("program should load")
+            .0
+        {
             Emulator::Lyminal(cpu) => cpu.rom().to_vec(),
             Emulator::Batpu2(_) => panic!("expected a Lyminal machine"),
         }

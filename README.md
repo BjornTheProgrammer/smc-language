@@ -108,6 +108,7 @@ Saving the loaded file reloads it, so you can edit in your usual editor and watc
 * The screen, gamepad, debugger, memory and console are panels. Pin them to any edge, stack them, resize them, or close them and reopen them from the toolbar. The layout is remembered between runs
 * While paused, click a byte in the memory panel to edit ROM, RAM or registers in hex. Shift-click selects a range to copy or paste
 * The console sends text to the ASCII port and shows what the program writes back
+* The source panel lists a `.lasm` program with the ROM address and bytes of each line, and highlights the line at the PC. Clicking a line selects its bytes in the memory panel
 
 | Gamepad | Keys |
 | --- | --- |

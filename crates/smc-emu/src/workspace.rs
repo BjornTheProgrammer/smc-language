@@ -16,15 +16,17 @@ pub enum Panel {
     Debugger,
     Memory,
     Console,
+    Source,
 }
 
 impl Panel {
-    pub const ALL: [Panel; 5] = [
+    pub const ALL: [Panel; 6] = [
         Panel::Screen,
         Panel::Gamepad,
         Panel::Debugger,
         Panel::Memory,
         Panel::Console,
+        Panel::Source,
     ];
 
     pub fn title(self) -> &'static str {
@@ -34,6 +36,7 @@ impl Panel {
             Panel::Debugger => "DEBUGGER",
             Panel::Memory => "MEMORY",
             Panel::Console => "CONSOLE",
+            Panel::Source => "SOURCE",
         }
     }
 
@@ -72,7 +75,8 @@ pub struct Workspace {
 
 impl Default for Workspace {
     /// The screen with the gamepad under it, and the debugger and memory stacked on the
-    /// right. The console starts closed, ready to open at the bottom.
+    /// right. The console starts closed, ready to open at the bottom, and the source on
+    /// the left.
     fn default() -> Self {
         let column = |top, bottom, ratio| Configuration::Split {
             axis: Axis::Horizontal,
@@ -94,6 +98,7 @@ impl Default for Workspace {
                 Some(Edge::Right),
                 Some(Edge::Right),
                 Some(Edge::Bottom),
+                Some(Edge::Left),
             ],
             path: None,
         }

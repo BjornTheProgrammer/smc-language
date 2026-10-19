@@ -21,7 +21,7 @@ use crate::{
     controller::Controller,
     editor::{Editor, KeyAction, Region},
     emulators::{
-        Emulator,
+        Emulator, Listing,
         batpu_2::Batpu2Emulator,
         lyminal::{self, Flag, Lyminal},
     },
@@ -76,6 +76,8 @@ pub struct App {
     program_path: Option<PathBuf>,
     /// When that file was last changed, to reload it when it's saved again
     program_modified: Option<SystemTime>,
+    /// The program's source and the ROM bytes of each line, for assembled programs
+    listing: Option<Listing>,
     /// The last load result or error, shown in the status bar and console
     notice: Option<String>,
     console_input: String,
@@ -152,6 +154,15 @@ impl App {
             Message::Key(event) => return self.key(event),
             Message::SelectByte(region, index) => {
                 self.editor.select(region, index, self.modifiers.shift());
+            }
+            Message::SelectLine(index) => {
+                if let Some(line) = self.listing.as_ref().and_then(|l| l.lines.get(index))
+                    && let Some(start) = line.address
+                {
+                    self.editor.select(Region::Rom, start, false);
+                    self.editor
+                        .select(Region::Rom, start + line.bytes.len() - 1, true);
+                }
             }
             Message::CopyHex => {
                 if let Some(cpu) = self.lyminal() {
@@ -262,11 +273,12 @@ impl App {
 
     /// Swaps in the program at `path` on a fresh machine, keeping the gamepad state
     fn open(&mut self, path: &Path) -> Result<(), String> {
-        let mut emulator = Emulator::load(path)?;
+        let (mut emulator, listing) = Emulator::load(path)?;
         if let Emulator::Lyminal(cpu) = &mut emulator {
             cpu.io.gamepad = self.controller.state();
         }
         self.emulator = emulator;
+        self.listing = listing;
         self.program_path = Some(path.to_path_buf());
         self.program_modified = modified(path);
         self.screen_version = u64::MAX;
@@ -371,6 +383,7 @@ impl App {
                 Panel::Debugger => scrollable(self.debugger()).spacing(4).into(),
                 Panel::Memory => self.memory(),
                 Panel::Console => self.console(),
+                Panel::Source => self.source(),
             };
 
             pane_grid::Content::new(container(body).padding(8))
@@ -855,6 +868,117 @@ impl App {
         .into()
     }
 
+    /// The program's source next to the ROM bytes each line became, with the line at the PC
+    /// highlighted. Clicking a line selects its bytes in the memory panel.
+    fn source(&self) -> Element<'_, Message> {
+        let (Some(listing), Some(cpu)) = (&self.listing, self.lyminal()) else {
+            return text("Load a .lasm program to see which ROM bytes each line became")
+                .size(11)
+                .color(ui::TEXT_DIM)
+                .into();
+        };
+
+        // Fixed columns so the source lines up; monospace digits are about 7px wide
+        const CHAR: f32 = 7.0;
+        let byte_chars = listing
+            .lines
+            .iter()
+            .map(|l| l.bytes.len() * 3)
+            .max()
+            .unwrap_or(0);
+        let text_chars = listing
+            .lines
+            .iter()
+            .map(|l| l.text.len())
+            .max()
+            .unwrap_or(0);
+        let width = (4 + byte_chars + text_chars) as f32 * CHAR + 28.0;
+
+        let current = listing.line_at(cpu.pc() as usize);
+        let rows = listing.lines.iter().enumerate().map(|(index, line)| {
+            let range = line
+                .address
+                .map(|start| start..start + line.bytes.len())
+                .unwrap_or_default();
+            let live: Vec<u8> = range
+                .clone()
+                .map(|address| cpu.rom().get(address).copied().unwrap_or(0))
+                .collect();
+            let edited = live != line.bytes;
+            let selected = range
+                .clone()
+                .any(|address| self.editor.is_selected(Region::Rom, address));
+
+            let row = container(
+                row![
+                    text(line.address.map(|a| format!("{a:02X}")).unwrap_or_default())
+                        .size(11)
+                        .font(ui::MONO)
+                        .color(ui::SECONDARY)
+                        .width(3.0 * CHAR),
+                    text(
+                        live.iter()
+                            .map(|b| format!("{b:02X}"))
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                    .size(11)
+                    .font(ui::MONO)
+                    .color(if edited {
+                        ui::ACCENT_BRIGHT
+                    } else {
+                        ui::TEXT_MUTED
+                    })
+                    .width(byte_chars as f32 * CHAR),
+                    text(&line.text)
+                        .size(11)
+                        .font(ui::MONO)
+                        .color(match line.address {
+                            Some(_) => ui::TEXT,
+                            None => ui::TEXT_DIM,
+                        })
+                        .wrapping(text::Wrapping::None),
+                ]
+                .spacing(10),
+            )
+            .width(width)
+            .padding([0, 4])
+            .style(ui::listing_line(current == Some(index), selected));
+
+            match line.address {
+                Some(_) => mouse_area(row)
+                    .on_press(Message::SelectLine(index))
+                    .interaction(mouse::Interaction::Pointer)
+                    .into(),
+                None => row.into(),
+            }
+        });
+
+        column![
+            text("Click a line to select its bytes in ROM")
+                .size(10)
+                .color(ui::TEXT_DIM),
+            container(
+                scrollable(
+                    Column::with_children(rows)
+                        .spacing(1)
+                        .padding(iced::Padding::new(6.0).left(4.0)),
+                )
+                .direction(scrollable::Direction::Both {
+                    vertical: Scrollbar::new().spacing(4),
+                    horizontal: Scrollbar::new().spacing(4),
+                })
+                .width(Length::Fill)
+                .height(Length::Fill),
+            )
+            .height(Length::Fill)
+            .width(Length::Fill)
+            .style(ui::inset),
+        ]
+        .spacing(8)
+        .into()
+    }
+
     fn console(&self) -> Element<'_, Message> {
         let Some(cpu) = self.lyminal() else {
             return text("Load a Lyminal program to use the ASCII port")
@@ -1160,6 +1284,8 @@ pub enum Message {
     ConsoleSubmit,
     Key(keyboard::Event),
     SelectByte(Region, usize),
+    /// Selects the ROM bytes of a source listing line
+    SelectLine(usize),
     CopyHex,
     CopyText,
     Paste,
@@ -1228,6 +1354,37 @@ mod tests {
             "{PROGRAMS}/hello-world.lasm"
         )))));
         app
+    }
+
+    #[test]
+    fn source_listing_maps_each_line_to_its_rom_bytes() {
+        let mut app = hello_app();
+        let listing = app
+            .listing
+            .clone()
+            .expect("assembled programs have a listing");
+
+        let first = &listing.lines[0];
+        assert_eq!(first.text, "LDI X 15 ; We want 16 values for our LUT");
+        assert_eq!(first.address, Some(0));
+        assert_eq!(listing.line_at(0), Some(0));
+        assert!(
+            listing
+                .lines
+                .iter()
+                .any(|line| line.text == ".init" && line.address.is_none()),
+            "labels have no bytes"
+        );
+
+        // In order, the lines' bytes are the program
+        let bytes: Vec<u8> = listing.lines.iter().flat_map(|l| l.bytes.clone()).collect();
+        assert_eq!(&app.lyminal().unwrap().rom()[..bytes.len()], &bytes[..]);
+
+        let second = &listing.lines[1];
+        let start = second.address.unwrap();
+        let _ = app.update(Message::SelectLine(1));
+        assert_eq!(app.editor.range(), start..=start + second.bytes.len() - 1);
+        assert_eq!(app.editor.region(), Some(Region::Rom));
     }
 
     #[test]
