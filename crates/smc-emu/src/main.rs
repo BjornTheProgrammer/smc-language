@@ -78,6 +78,9 @@ pub struct App {
     program_modified: Option<SystemTime>,
     /// The program's source and the ROM bytes of each line, for assembled programs
     listing: Option<Listing>,
+    /// The listing lines selected from the source panel, as where the selection started and
+    /// the line it's on now. `None` when the selection came from the memory panel.
+    source_selection: Option<(usize, usize)>,
     /// The last load result or error, shown in the status bar and console
     notice: Option<String>,
     console_input: String,
@@ -154,15 +157,14 @@ impl App {
             Message::Key(event) => return self.key(event),
             Message::SelectByte(region, index) => {
                 self.editor.select(region, index, self.modifiers.shift());
+                self.source_selection = None;
             }
             Message::SelectLine(index) => {
-                if let Some(line) = self.listing.as_ref().and_then(|l| l.lines.get(index))
-                    && let Some(start) = line.address
-                {
-                    self.editor.select(Region::Rom, start, false);
-                    self.editor
-                        .select(Region::Rom, start + line.bytes.len() - 1, true);
-                }
+                let anchor = match self.source_selection {
+                    Some((anchor, _)) if self.modifiers.shift() => anchor,
+                    _ => index,
+                };
+                self.select_source_lines(anchor, index);
             }
             Message::CopyHex => {
                 if let Some(cpu) = self.lyminal() {
@@ -233,6 +235,13 @@ impl App {
 
         if let keyboard::Event::KeyPressed { key, modifiers, .. } = &event
             && !self.running
+            && self.source_key(key, *modifiers)
+        {
+            return Task::none();
+        }
+
+        if let keyboard::Event::KeyPressed { key, modifiers, .. } = &event
+            && !self.running
             && let Emulator::Lyminal(cpu) = &mut self.emulator
         {
             match self.editor.key(key, *modifiers, cpu) {
@@ -247,6 +256,60 @@ impl App {
             Some(message) => self.update(Message::Controller(message)),
             None => Task::none(),
         }
+    }
+
+    /// Moves a source panel selection with the arrow keys, by lines with code. Returns
+    /// whether the key was used.
+    fn source_key(&mut self, key: &keyboard::Key, modifiers: Modifiers) -> bool {
+        use keyboard::key::Named;
+
+        let (Some((anchor, cursor)), Some(listing)) = (self.source_selection, &self.listing) else {
+            return false;
+        };
+        let has_code = |index: &usize| listing.lines[*index].address.is_some();
+        let next = match key.as_ref() {
+            keyboard::Key::Named(Named::ArrowUp) => (0..cursor).rev().find(has_code),
+            keyboard::Key::Named(Named::ArrowDown) => {
+                (cursor + 1..listing.lines.len()).find(has_code)
+            }
+            keyboard::Key::Named(Named::Escape) => {
+                self.source_selection = None;
+                return false;
+            }
+            _ => return false,
+        };
+
+        if let Some(next) = next {
+            let anchor = if modifiers.shift() { anchor } else { next };
+            self.select_source_lines(anchor, next);
+        }
+        true
+    }
+
+    /// Selects the ROM bytes of every source line from `anchor` to `cursor`
+    fn select_source_lines(&mut self, anchor: usize, cursor: usize) {
+        let Some(listing) = &self.listing else {
+            return;
+        };
+        let lines = &listing.lines[anchor.min(cursor)..=anchor.max(cursor)];
+        let start = lines.iter().find_map(|line| line.address);
+        let end = lines
+            .iter()
+            .rev()
+            .find_map(|line| line.address.map(|start| start + line.bytes.len() - 1));
+        let (Some(start), Some(end)) = (start, end) else {
+            return;
+        };
+
+        // The ROM cursor follows the source cursor, so typing starts there
+        let (from, to) = if cursor >= anchor {
+            (start, end)
+        } else {
+            (end, start)
+        };
+        self.editor.select(Region::Rom, from, false);
+        self.editor.select(Region::Rom, to, true);
+        self.source_selection = Some((anchor, cursor));
     }
 
     fn paste(&mut self, text: &str) {
@@ -279,6 +342,7 @@ impl App {
         }
         self.emulator = emulator;
         self.listing = listing;
+        self.source_selection = None;
         self.program_path = Some(path.to_path_buf());
         self.program_modified = modified(path);
         self.screen_version = u64::MAX;
@@ -1407,6 +1471,57 @@ mod tests {
         }
         assert_eq!(app.editor.region(), Some(Region::Rom));
         assert_eq!(app.editor.range(), 5..=5);
+    }
+
+    fn arrow(named: keyboard::key::Named, modifiers: Modifiers) -> Message {
+        Message::Key(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(named),
+            modified_key: keyboard::Key::Named(named),
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn source_lines_extend_with_shift_and_move_with_arrows() {
+        use keyboard::key::Named::{ArrowDown, ArrowUp};
+        let mut app = hello_app();
+        let shift = |app: &mut App, held: bool| {
+            let modifiers = if held {
+                Modifiers::SHIFT
+            } else {
+                Modifiers::empty()
+            };
+            let _ = app.update(Message::Key(keyboard::Event::ModifiersChanged(modifiers)));
+        };
+
+        // INC Y X at 05, then shift-click PIZ at 07
+        let _ = app.update(Message::SelectLine(4));
+        shift(&mut app, true);
+        let _ = app.update(Message::SelectLine(6));
+        assert_eq!(app.editor.range(), 5..=7);
+        shift(&mut app, false);
+
+        // Down moves to JMP .init, two bytes at 08
+        let _ = app.update(arrow(ArrowDown, Modifiers::empty()));
+        assert_eq!(app.editor.range(), 8..=9);
+        let _ = app.update(arrow(ArrowUp, Modifiers::SHIFT));
+        assert_eq!(app.editor.range(), 7..=9, "shift extends upwards");
+
+        // Up skips the .init label, from MOV X Y at 04 to MST at 02
+        let _ = app.update(Message::SelectLine(3));
+        let _ = app.update(arrow(ArrowUp, Modifiers::empty()));
+        assert_eq!(app.editor.range(), 2..=3);
+
+        // Clicking memory hands the arrows back to the memory editor
+        let _ = app.update(Message::SelectByte(Region::Rom, 0x10));
+        let _ = app.update(arrow(ArrowDown, Modifiers::empty()));
+        assert_eq!(app.editor.range(), 0x18..=0x18);
     }
 
     #[test]
