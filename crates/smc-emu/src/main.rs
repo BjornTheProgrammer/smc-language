@@ -35,6 +35,7 @@ pub mod emulators;
 pub mod reveal;
 pub mod screen;
 pub mod ui;
+pub mod update;
 pub mod workspace;
 
 const PROGRAM_CAPACITY: usize = 1023;
@@ -56,7 +57,14 @@ const TICK: Duration = Duration::from_millis(16);
 const RELOAD_CHECK: Duration = Duration::from_millis(500);
 
 fn main() -> iced::Result {
-    iced::application(App::new, App::update, App::view)
+    // Look for a newer release in the background while the window opens
+    let boot = || {
+        (
+            App::new(),
+            Task::perform(update::check(), Message::UpdateChecked),
+        )
+    };
+    iced::application(boot, App::update, App::view)
         .subscription(App::subscription)
         .theme(ui::theme())
         .title("SMC Emulator")
@@ -87,6 +95,8 @@ pub struct App {
     program_modified: Option<SystemTime>,
     /// The program's source and the ROM bytes of each line, for assembled programs
     listing: Option<Listing>,
+    /// A newer release this copy can update itself to
+    update: Option<String>,
     /// The listing lines selected from the source panel, as where the selection started and
     /// the line it's on now. `None` when the selection came from the memory panel.
     source_selection: Option<(usize, usize)>,
@@ -197,6 +207,19 @@ impl App {
                 if let Some(cpu) = self.lyminal_mut() {
                     cpu.io.gamepad = state;
                 }
+            }
+            Message::UpdateChecked(version) => self.update = version,
+            Message::InstallUpdate => {
+                if let Some(version) = self.update.take() {
+                    self.notice = Some(format!("Updating to v{version}…"));
+                    return Task::perform(update::install(), Message::UpdateInstalled);
+                }
+            }
+            Message::UpdateInstalled(result) => {
+                self.notice = Some(match result {
+                    Ok(version) => format!("Updated to v{version}. Restart the emulator to use it"),
+                    Err(error) => format!("Update failed: {error}"),
+                });
             }
             Message::ToggleFlag(flag) => {
                 if !self.running
@@ -1254,10 +1277,22 @@ impl App {
                 )
                 .size(10)
                 .color(ui::TEXT_MUTED),
+            ]
+            .push(self.update.as_ref().map(|version| {
+                button(
+                    text(format!("UPDATE TO v{version}"))
+                        .size(10)
+                        .font(ui::BOLD),
+                )
+                .padding([0, 8])
+                .style(ui::run_button)
+                .on_press(Message::InstallUpdate)
+            }))
+            .push(
                 text(concat!("v", env!("CARGO_PKG_VERSION")))
                     .size(10)
                     .color(ui::TEXT_DIM),
-            ]
+            )
             .spacing(16),
         )
         .padding([3, 12])
@@ -1416,6 +1451,11 @@ pub enum Message {
     Pasted(Option<String>),
     SetSpeed(u32),
     ToggleFlag(Flag),
+    /// The newest release this copy can update to, if any
+    UpdateChecked(Option<String>),
+    InstallUpdate,
+    /// The version installed, or why it couldn't be
+    UpdateInstalled(Result<String, String>),
     ClockInput(String),
     ClockSubmit,
     Workspace(workspace::Message),
