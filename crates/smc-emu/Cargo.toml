@@ -17,7 +17,7 @@ eula = false
 smc-assembler = { version = "0.4.0", path = "../smc-assembler" }
 thiserror = { workspace = true }
 
-iced = { version = "0.14", features = ["canvas", "tokio"] }
+iced = { version = "0.14", features = ["advanced", "canvas", "tokio"] }
 rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "tokio"] }
 dirs = "6"
 serde = { version = "1", features = ["derive"] }

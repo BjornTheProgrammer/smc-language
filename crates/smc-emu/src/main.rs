@@ -32,12 +32,20 @@ use crate::{
 pub mod controller;
 pub mod editor;
 pub mod emulators;
+pub mod reveal;
 pub mod screen;
 pub mod ui;
 pub mod workspace;
 
 const PROGRAM_CAPACITY: usize = 1023;
 const MEMORY_ROW_BYTES: usize = 8;
+// Fixed row heights in the hex views and the listing, so a row's position is known when
+// scrolling to it. Both lists start LIST_TOP into their content and space rows 1px apart.
+const MEMORY_ROW_HEIGHT: f32 = 16.0;
+const LISTING_ROW_HEIGHT: f32 = 18.0;
+const LIST_TOP: f32 = 6.0;
+const LISTING_ID: &str = "listing";
+const ROM_ID: &str = "rom";
 /// The fastest clock that can be typed in, in Hz; the slider goes up to `SLIDER_MAX`
 const CLOCK_MAX: u32 = 1_000_000;
 const SLIDER_MAX: u32 = 1000;
@@ -158,6 +166,7 @@ impl App {
             Message::SelectByte(region, index) => {
                 self.editor.select(region, index, self.modifiers.shift());
                 self.source_selection = None;
+                return self.reveal_selection();
             }
             Message::SelectLine(index) => {
                 let anchor = match self.source_selection {
@@ -165,6 +174,7 @@ impl App {
                     _ => index,
                 };
                 self.select_source_lines(anchor, index);
+                return self.reveal_selection();
             }
             Message::CopyHex => {
                 if let Some(cpu) = self.lyminal() {
@@ -237,7 +247,7 @@ impl App {
             && !self.running
             && self.source_key(key, *modifiers)
         {
-            return Task::none();
+            return self.reveal_selection();
         }
 
         if let keyboard::Event::KeyPressed { key, modifiers, .. } = &event
@@ -245,7 +255,7 @@ impl App {
             && let Emulator::Lyminal(cpu) = &mut self.emulator
         {
             match self.editor.key(key, *modifiers, cpu) {
-                KeyAction::Handled => return Task::none(),
+                KeyAction::Handled => return self.reveal_selection(),
                 KeyAction::Copy(text) => return clipboard::write(text),
                 KeyAction::Paste => return clipboard::read().map(Message::Pasted),
                 KeyAction::Ignored => {}
@@ -255,6 +265,37 @@ impl App {
         match Controller::message_for(&event) {
             Some(message) => self.update(Message::Controller(message)),
             None => Task::none(),
+        }
+    }
+
+    /// Scrolls the other view to the selected ROM bytes when they're off screen: ROM for a
+    /// selection made in the source panel, the source for one made in memory
+    fn reveal_selection(&self) -> Task<Message> {
+        if self.editor.region() != Some(Region::Rom) {
+            return Task::none();
+        }
+        let range = self.editor.range();
+        let pitch = |height: f32| height + 1.0;
+
+        if self.source_selection.is_some() {
+            let rows = range.start() / MEMORY_ROW_BYTES..=range.end() / MEMORY_ROW_BYTES;
+            return reveal::rows(ROM_ID, LIST_TOP, pitch(MEMORY_ROW_HEIGHT), rows);
+        }
+
+        let lines: Vec<usize> = match &self.listing {
+            Some(listing) => range
+                .filter_map(|address| listing.line_at(address))
+                .collect(),
+            None => Vec::new(),
+        };
+        match (lines.iter().min(), lines.iter().max()) {
+            (Some(&first), Some(&last)) => reveal::rows(
+                LISTING_ID,
+                LIST_TOP,
+                pitch(LISTING_ROW_HEIGHT),
+                first..=last,
+            ),
+            _ => Task::none(),
         }
     }
 
@@ -898,6 +939,7 @@ impl App {
             .push(ascii.then(|| text(chars).size(11).font(ui::MONO).color(ui::TEXT_DIM)))
             .spacing(10)
             .align_y(Alignment::Center)
+            .height(MEMORY_ROW_HEIGHT)
             .into()
         });
 
@@ -914,8 +956,12 @@ impl App {
                 scrollable(
                     Column::with_children(rows)
                         .spacing(1)
-                        .padding(iced::Padding::new(6.0).left(8.0)),
+                        .padding(iced::Padding::new(LIST_TOP).left(8.0)),
                 )
+                .id(match region {
+                    Region::Rom => ROM_ID,
+                    _ => "ram",
+                })
                 // Rows keep their width; narrow panels scroll sideways
                 .direction(scrollable::Direction::Both {
                     vertical: Scrollbar::new().spacing(4),
@@ -1008,11 +1054,16 @@ impl App {
             match line.address {
                 Some(_) => button(columns)
                     .width(width)
+                    .height(LISTING_ROW_HEIGHT)
                     .padding([1, 4])
                     .style(ui::listing_line(current == Some(index), selected))
                     .on_press(Message::SelectLine(index))
                     .into(),
-                None => container(columns).width(width).padding([1, 4]).into(),
+                None => container(columns)
+                    .width(width)
+                    .height(LISTING_ROW_HEIGHT)
+                    .padding([1, 4])
+                    .into(),
             }
         });
 
@@ -1024,8 +1075,9 @@ impl App {
                 scrollable(
                     Column::with_children(rows)
                         .spacing(1)
-                        .padding(iced::Padding::new(6.0).left(4.0)),
+                        .padding(iced::Padding::new(LIST_TOP).left(4.0)),
                 )
+                .id(LISTING_ID)
                 .direction(scrollable::Direction::Both {
                     vertical: Scrollbar::new().spacing(4),
                     horizontal: Scrollbar::new().spacing(4),
